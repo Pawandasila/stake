@@ -26,7 +26,7 @@ interface BetModalProps {
   matchDescription: string;
   selectedOutcomeName: string;
   odds: number;
-  eventMatchTime: Date; // Added eventMatchTime
+  eventMatchTime: Date; 
 }
 
 const BetModal: React.FC<BetModalProps> = ({
@@ -36,7 +36,7 @@ const BetModal: React.FC<BetModalProps> = ({
   matchDescription,
   selectedOutcomeName,
   odds,
-  eventMatchTime, // Use eventMatchTime
+  eventMatchTime, 
 }) => {
   const [stake, setStake] = useState<number>(MIN_BET_AMOUNT);
   const [potentialWinnings, setPotentialWinnings] = useState<number>(0);
@@ -83,8 +83,7 @@ const BetModal: React.FC<BetModalProps> = ({
     }
     setError('');
     
-    // Pass eventMatchTime to placeBet
-    const success = placeBet(matchId, matchDescription, selectedOutcomeName, stake, odds, eventMatchTime);
+    const success = placeBet(matchId, matchDescription, selectedOutcomeName, stake, odds, new Date(eventMatchTime)); // Ensure it's a Date object
     if (success) {
       onClose();
     }

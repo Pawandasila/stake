@@ -1,3 +1,6 @@
+// src/types/index.ts
+import type { GameType as LibGameType } from '@/lib/validation'; // Import to re-export
+
 export type Team = {
   id: string;
   name: string;
@@ -19,17 +22,22 @@ export type Match = {
   };
 };
 
+export type GameType = LibGameType; // Re-export GameType
+
 export type PlacedBet = {
   id: string;
-  matchId: string;
-  matchDescription: string; // e.g., "Team A vs Team B"
-  selectedOutcome: string; // e.g., "Team A Win", "Draw", "Team B Win"
+  matchId: string; // For sports bets, this is the actual match ID. For game bets, could be a game instance ID.
+  matchDescription: string; // e.g., "Team A vs Team B" or "Plane Game Round #123"
+  selectedOutcome: string; // e.g., "Team A Win", "Draw", "Cashed out at 2.5x"
   stake: number;
-  odds: number;
+  odds: number; // For sports bets, fixed odds. For game bets, can be initial multiplier or final cash-out multiplier.
   potentialWinnings: number;
-  timestamp: Date; // Time the bet was placed
-  matchTime: Date; // Time of the actual match/event
-  status: 'pending' | 'won' | 'lost' | 'withdrawn' | 'cashed_out_early';
+  timestamp: Date; // Time the bet was placed or action taken
+  matchTime: Date; // Time of the actual match/event (for sports bets)
+  status: 'pending' | 'won' | 'lost' | 'withdrawn' | 'cashed_out'; // Added 'cashed_out'
+  betType: 'match' | 'game'; // Distinguishes between sports match bets and game bets
+  gameType?: GameType; // Specifies the type of game if betType is 'game'
+  gameSpecificParams?: Record<string, any>; // Store any game-specific data like target multiplier for plane game
 };
 
 export type TeamPerformanceDataPoint = {
@@ -41,4 +49,3 @@ export type TeamPerformance = {
   teamId: string;
   data: TeamPerformanceDataPoint[];
 };
-

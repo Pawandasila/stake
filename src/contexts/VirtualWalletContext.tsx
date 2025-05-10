@@ -1,11 +1,13 @@
 // src/contexts/VirtualWalletContext.tsx
 "use client";
 
-import type { PlacedBet } from '@/types';
+import type { PlacedBet, GameType } from '@/types'; // Updated GameType import
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
-import { INITIAL_VIRTUAL_BALANCE, MIN_BET_AMOUNT } from '@/lib/constants';
+import { INITIAL_VIRTUAL_BALANCE, MIN_BET_AMOUNT, MAX_BET_AMOUNT } from '@/lib/constants';
 import { useToast } from '@/hooks/use-toast';
 import { v4 as uuidv4 } from 'uuid';
+import { validateBetPlacement, validateGameAction } from '@/lib/validation';
+
 
 const MATCH_RESOLUTION_DELAY_MS = 2 * 60 * 60 * 1000; // 2 hours for mock match duration
 const BET_WITHDRAWAL_CUTOFF_MS = 5 * 60 * 1000; // 5 minutes
@@ -15,6 +17,7 @@ interface VirtualWalletContextType {
   bets: PlacedBet[];
   addFunds: (amount: number) => void;
   placeBet: (matchId: string, matchDescription: string, selectedOutcome: string, stake: number, odds: number, matchTime: Date) => boolean;
+  placeGameBet: (gameType: GameType, stake: number, gameSpecificParams?: Record<string, any>) => boolean;
   withdrawBet: (betId: string) => void;
   updateBalance: (amount: number) => void; 
 }
@@ -40,11 +43,14 @@ export const VirtualWalletProvider: React.FC<{ children: React.ReactNode }> = ({
         setBets(parsedBets.map((bet: any) => ({
           ...bet, 
           timestamp: new Date(bet.timestamp), 
-          matchTime: new Date(bet.matchTime) // Ensure matchTime is converted to Date
+          matchTime: new Date(bet.matchTime), // Ensure matchTime is always a Date object
+          betType: bet.betType || 'match', // Default to match if not specified
+          gameType: bet.gameType,
+          gameSpecificParams: bet.gameSpecificParams
         } as PlacedBet)));
       } catch (error) {
         console.error("Failed to parse bets from localStorage", error);
-        setBets([]); // Reset to empty array if parsing fails
+        setBets([]); 
       }
     }
   }, []);
@@ -72,12 +78,18 @@ export const VirtualWalletProvider: React.FC<{ children: React.ReactNode }> = ({
 
 
   const placeBet = useCallback((matchId: string, matchDescription: string, selectedOutcome: string, stake: number, odds: number, matchTime: Date): boolean => {
-    if (stake < MIN_BET_AMOUNT) {
-      setTimeout(() => toast({ title: "Invalid Amount", description: `Minimum bet amount is ${MIN_BET_AMOUNT}.`, variant: "destructive" }), 0);
-      return false;
-    }
-    if (balance < stake) {
-      setTimeout(() => toast({ title: "Insufficient Funds", description: "You don't have enough balance to place this bet.", variant: "destructive" }), 0);
+    const validationError = validateBetPlacement({
+      betType: 'match',
+      matchId,
+      stake,
+      currentBalance: balance,
+      existingBets: bets,
+      minBetAmount: MIN_BET_AMOUNT,
+      maxBetAmount: MAX_BET_AMOUNT,
+    });
+
+    if (validationError) {
+      setTimeout(() => toast({ title: validationError.title, description: validationError.description, variant: "destructive" }), 0);
       return false;
     }
     
@@ -89,46 +101,87 @@ export const VirtualWalletProvider: React.FC<{ children: React.ReactNode }> = ({
       stake,
       odds,
       potentialWinnings: parseFloat((stake * odds).toFixed(2)),
-      timestamp: new Date(), // Bet placement time
-      matchTime: matchTime, // Store the event's match time
+      timestamp: new Date(), 
+      matchTime: matchTime, 
       status: 'pending',
+      betType: 'match',
     };
 
     setBalance(prevBalance => parseFloat((prevBalance - stake).toFixed(2)));
     setBets(prevBets => [newBet, ...prevBets]);
     setTimeout(() => toast({ title: "Bet Placed!", description: `Successfully placed a ${stake} unit bet on ${selectedOutcome}. Potential win: ${newBet.potentialWinnings.toFixed(2)}.`, className: "bg-primary text-primary-foreground", duration: 3000 }), 0);
     return true;
+  }, [balance, bets, toast]);
+
+  const placeGameBet = useCallback((gameType: GameType, stake: number, gameSpecificParams?: Record<string, any>): boolean => {
+    const validationError = validateGameAction({
+      gameType,
+      actionType: 'place_bet',
+      stake,
+      currentBalance: balance,
+      minBetAmount: gameSpecificParams?.minBet ?? MIN_BET_AMOUNT, 
+      maxBetAmount: gameSpecificParams?.maxBet ?? MAX_BET_AMOUNT,
+    });
+
+    if (validationError) {
+        setTimeout(() => toast({ title: validationError.title, description: validationError.description, variant: "destructive" }), 0);
+        return false;
+    }
+    
+    const newBet: PlacedBet = {
+        id: uuidv4(),
+        matchId: `${gameType}-${uuidv4()}`, 
+        matchDescription: `${gameType.charAt(0).toUpperCase() + gameType.slice(1)} Game`,
+        selectedOutcome: `Bet on ${gameType}`, 
+        stake,
+        odds: 1, 
+        potentialWinnings: stake, 
+        timestamp: new Date(),
+        matchTime: new Date(), // For game bets, matchTime might be effectively now or not strictly applicable like sports
+        status: 'pending', 
+        betType: 'game',
+        gameType: gameType,
+        gameSpecificParams,
+    };
+
+    setBalance(prevBalance => parseFloat((prevBalance - stake).toFixed(2)));
+    setBets(prevBets => [newBet, ...prevBets]);
+    setTimeout(() => toast({ title: "Game Bet Placed!", description: `Successfully placed a ${stake} unit bet on the ${newBet.matchDescription}.`, className: "bg-primary text-primary-foreground", duration: 3000 }), 0);
+    return true;
   }, [balance, toast]);
 
 
   const withdrawBet = useCallback((betId: string) => {
-    setBets(prevBets => {
-      const betIndex = prevBets.findIndex(b => b.id === betId);
-      if (betIndex === -1) {
-        setTimeout(() => toast({ title: "Error", description: "Bet not found.", variant: "destructive" }), 0);
-        return prevBets;
-      }
-      const bet = prevBets[betIndex];
-      const eventTime = new Date(bet.matchTime); 
+    const betToWithdraw = bets.find(b => b.id === betId);
 
-      if (eventTime.getTime() - Date.now() > BET_WITHDRAWAL_CUTOFF_MS) {
-        const newBalance = parseFloat((balance + bet.stake).toFixed(2));
-        setBalance(newBalance);
-        setTimeout(() => toast({ title: "Bet Withdrawn", description: `Your bet on ${bet.matchDescription} has been withdrawn. ${bet.stake} units refunded.`, className: "bg-primary text-primary-foreground" }), 0);
-         const updatedBets = [...prevBets];
-         updatedBets[betIndex] = { ...bet, status: 'withdrawn' };
-         return updatedBets;
+    if (!betToWithdraw) {
+      setTimeout(() => toast({ title: "Error", description: "Bet not found.", variant: "destructive" }), 0);
+      return;
+    }
 
-      } else if (eventTime.getTime() < Date.now()) {
-         setTimeout(() => toast({ title: "Withdrawal Failed", description: "Cannot withdraw, match has already started or finished.", variant: "destructive" }), 0);
-         return prevBets;
-      }
-      else {
-        setTimeout(() => toast({ title: "Withdrawal Failed", description: `Cannot withdraw, too close to match start (less than ${BET_WITHDRAWAL_CUTOFF_MS / 60000} minutes).`, variant: "destructive" }), 0);
-        return prevBets;
-      }
-    });
-  }, [balance, toast, setBalance, setBets]);
+    if (betToWithdraw.betType !== 'match') {
+      setTimeout(() => toast({ title: "Withdrawal Failed", description: "This bet type cannot be withdrawn (only match bets).", variant: "destructive" }), 0);
+      return;
+    }
+
+    if (betToWithdraw.status !== 'pending') {
+      setTimeout(() => toast({ title: "Withdrawal Failed", description: `Cannot withdraw bet with status: ${betToWithdraw.status}.`, variant: "destructive" }), 0);
+      return;
+    }
+    
+    const eventTime = new Date(betToWithdraw.matchTime);
+    const timeNow = Date.now();
+
+    if (eventTime.getTime() - timeNow > BET_WITHDRAWAL_CUTOFF_MS) {
+      setBets(prevBets => prevBets.map(b => b.id === betId ? { ...b, status: 'withdrawn' } : b));
+      setBalance(prevBal => parseFloat((prevBal + betToWithdraw.stake).toFixed(2)));
+      setTimeout(() => toast({ title: "Bet Withdrawn", description: `Your bet on ${betToWithdraw.matchDescription} has been withdrawn. ${betToWithdraw.stake} units refunded.`, className: "bg-primary text-primary-foreground" }), 0);
+    } else if (eventTime.getTime() < timeNow) {
+      setTimeout(() => toast({ title: "Withdrawal Failed", description: "Cannot withdraw, match has already started or finished.", variant: "destructive" }), 0);
+    } else {
+      setTimeout(() => toast({ title: "Withdrawal Failed", description: `Cannot withdraw, too close to match start (less than ${BET_WITHDRAWAL_CUTOFF_MS / 60000} minutes).`, variant: "destructive" }), 0);
+    }
+  }, [bets, toast, setBalance, setBets]);
 
 
   const resolveBetsAndUpdateState = useCallback(() => {
@@ -136,8 +189,7 @@ export const VirtualWalletProvider: React.FC<{ children: React.ReactNode }> = ({
     let betsChangedInLoop = false;
 
     const updatedBets = bets.map(bet => {
-        const eventTime = new Date(bet.matchTime);
-        if (bet.status === 'pending' && eventTime.getTime() < Date.now() - MATCH_RESOLUTION_DELAY_MS) {
+        if (bet.betType === 'match' && bet.status === 'pending' && new Date(bet.matchTime).getTime() < Date.now() - MATCH_RESOLUTION_DELAY_MS) {
             betsChangedInLoop = true;
             const won = Math.random() < 0.4; 
             if (won) {
@@ -170,7 +222,7 @@ export const VirtualWalletProvider: React.FC<{ children: React.ReactNode }> = ({
 
 
   return (
-    <VirtualWalletContext.Provider value={{ balance, bets, addFunds, placeBet, withdrawBet, updateBalance }}>
+    <VirtualWalletContext.Provider value={{ balance, bets, addFunds, placeBet, placeGameBet, withdrawBet, updateBalance }}>
       {children}
     </VirtualWalletContext.Provider>
   );
@@ -183,4 +235,3 @@ export const useVirtualWallet = (): VirtualWalletContextType => {
   }
   return context;
 };
-
