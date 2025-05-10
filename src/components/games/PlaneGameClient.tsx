@@ -11,7 +11,7 @@ import { DollarSign, Target, Rocket, CheckCircle2 } from 'lucide-react';
 import GsapAnimatedNumber from '../animations/GsapAnimatedNumber';
 import { useToast } from '@/hooks/use-toast';
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, ReferenceLine, Label as RechartsLabelComponent } from 'recharts'; // Imported Label as RechartsLabelComponent
-import type { GameActionValidationParams } from '@/lib/validation';
+import type { GameActionValidationParams, GameActionValidationResult } from '@/lib/validation';
 import { validateGameAction } from '@/lib/validation';
 
 type GamePhase = 'idle' | 'betting' | 'running' | 'crashed' | 'cashed_out';
@@ -83,16 +83,16 @@ const PlaneGameClient = () => {
         currentBalance: balance,
         minBetAmount: MIN_BET,
         maxBetAmount: MAX_BET,
-        targetMultiplier: numericTargetMultiplierValue, // Pass targetMultiplier for validation
+        gameSpecificParams: { targetMultiplier: numericTargetMultiplierValue }, 
         minTargetMultiplier: MIN_MULTIPLIER_TARGET,
         maxTargetMultiplier: MAX_MULTIPLIER_TARGET,
     };
 
-    const validationError = validateGameAction(validationParams);
-    if (validationError) {
-        setMessage(validationError.description);
+    const validationResult: GameActionValidationResult = validateGameAction(validationParams);
+    if (!validationResult.isValid && validationResult.error) {
+        setMessage(validationResult.error.description);
         setMessageType('error');
-        toast({ title: validationError.title, description: validationError.description, variant: "destructive" });
+        toast({ title: validationResult.error.title, description: validationResult.error.description, variant: "destructive" });
         return;
     }
     
@@ -361,7 +361,7 @@ const PlaneGameClient = () => {
                   value={betAmount}
                   onChange={handleBetAmountChange}
                   className="pl-10 h-11 text-md"
-                  disabled={gamePhase === 'running'}
+                  disabled={gamePhase === 'crashed' || gamePhase === 'cashed_out'}
                 />
               </div>
             </div>
@@ -376,7 +376,7 @@ const PlaneGameClient = () => {
                   onChange={handleTargetMultiplierChange}
                   placeholder={`${MIN_MULTIPLIER_TARGET}x - ${MAX_MULTIPLIER_TARGET}x (optional)`}
                   className="pl-10 h-11 text-md"
-                  disabled={gamePhase === 'running'}
+                  disabled={gamePhase === 'crashed' || gamePhase === 'cashed_out'}
                 />
               </div>
             </div>
