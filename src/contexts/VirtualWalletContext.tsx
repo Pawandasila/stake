@@ -1,276 +1,360 @@
 // src/contexts/VirtualWalletContext.tsx
 "use client";
 
-import type { PlacedBet, GameType } from '@/types';
-import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
-import { INITIAL_VIRTUAL_BALANCE, MIN_BET_AMOUNT, MAX_BET_AMOUNT } from '@/lib/constants';
+import type { PlacedBet, GameType as LibGameType } from '@/types';
+import React, { createContext, useContext, useState, useEffect, useCallback, useMemo } from 'react';
+import { INITIAL_VIRTUAL_BALANCE } from '@/lib/constants';
 import { useToast } from '@/hooks/use-toast';
 import { v4 as uuidv4 } from 'uuid';
-import { validateBetPlacement, validateGameAction, type ValidationResultError } from '@/lib/validation';
-import { useAuth } from './AuthContext'; // Import useAuth
+import { validateBetPlacement, validateGameAction } from '@/lib/validation'; // Assuming this path is correct now
+import type { ValidationResult, GameActionValidationParams } from '@/lib/validation';
+import { useAuth } from './AuthContext';
+import { db } from '@/lib/firebase';
+import { doc, getDoc, setDoc, writeBatch, collection, query, where, getDocs, updateDoc, increment } from 'firebase/firestore';
+import type { User } from 'firebase/auth';
+
 
 const MATCH_RESOLUTION_DELAY_MS = 2 * 60 * 60 * 1000; // 2 hours for mock match duration
 const BET_WITHDRAWAL_CUTOFF_MS = 5 * 60 * 1000; // 5 minutes
 
-interface VirtualWalletContextType {
+export interface VirtualWalletContextType {
   balance: number;
   bets: PlacedBet[];
-  addFunds: (amount: number) => void;
-  placeBet: (matchId: string, matchDescription: string, selectedOutcome: string, stake: number, odds: number, matchTime: Date) => boolean;
-  placeGameBet: (gameType: GameType, stake: number, gameSpecificParams?: Record<string, any>) => boolean;
-  withdrawBet: (betId: string) => void;
-  updateBalance: (amount: number, description?: string) => void; 
+  addFunds: (amount: number) => Promise<void>;
+  placeBet: (matchId: string, matchDescription: string, selectedOutcome: string, stake: number, odds: number, matchTime: Date) => Promise<boolean>;
+  placeGameBet: (gameType: LibGameType, stake: number, gameSpecificParams?: Record<string, any>) => Promise<boolean>;
+  withdrawBet: (betId: string) => Promise<void>;
+  updateBalance: (amount: number, description?: string) => void; // This is more for direct local updates, use with caution
+  isLoading: boolean;
+  fetchUserWalletData: (userId: string) => Promise<void>;
 }
 
 const VirtualWalletContext = createContext<VirtualWalletContextType | undefined>(undefined);
 
 export const VirtualWalletProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const { currentUser } = useAuth(); // Get current user
+  const { currentUser, loading: authLoading } = useAuth();
   const [balance, setBalance] = useState<number>(INITIAL_VIRTUAL_BALANCE);
   const [bets, setBets] = useState<PlacedBet[]>([]);
   const { toast } = useToast();
+  const [walletLoading, setWalletLoading] = useState(true);
 
-  // TODO: When Firestore is integrated, balance and bets will be fetched and stored per user.
-  // For now, localStorage will be user-agnostic or keyed by a generic ID if no user.
-  const storageKeySuffix = currentUser ? `_${currentUser.uid}` : '_guest';
-
-  useEffect(() => {
-    const storedBalance = localStorage.getItem(`virtualBalance${storageKeySuffix}`);
-    if (storedBalance) {
-      setBalance(parseFloat(storedBalance));
-    } else {
-      setBalance(INITIAL_VIRTUAL_BALANCE);
-    }
-    const storedBets = localStorage.getItem(`virtualBets${storageKeySuffix}`);
-    if (storedBets) {
-      try {
-        const parsedBets = JSON.parse(storedBets) as Array<any>;
-        setBets(parsedBets.map((bet: any) => ({
-          ...bet, 
-          timestamp: new Date(bet.timestamp), 
-          matchTime: new Date(bet.matchTime),
-          betType: bet.betType || 'match',
-          gameType: bet.gameType,
-          gameSpecificParams: bet.gameSpecificParams,
-          userId: bet.userId || (currentUser ? currentUser.uid : undefined) // Ensure userId is present
-        } as PlacedBet)));
-      } catch (error) {
-        console.error("Failed to parse bets from localStorage", error);
-        setBets([]); 
+  const fetchUserWalletData = useCallback(async (userId: string) => {
+    setWalletLoading(true);
+    try {
+      const userWalletRef = doc(db, "wallets", userId);
+      const walletSnap = await getDoc(userWalletRef);
+      if (walletSnap.exists()) {
+        setBalance(walletSnap.data().balance || INITIAL_VIRTUAL_BALANCE);
+      } else {
+        await setDoc(userWalletRef, { balance: INITIAL_VIRTUAL_BALANCE, userId });
+        setBalance(INITIAL_VIRTUAL_BALANCE);
       }
-    } else {
-        setBets([]); // Initialize with empty array if nothing in storage
+
+      const betsQuery = query(collection(db, "bets"), where("userId", "==", userId));
+      const betsSnap = await getDocs(betsQuery);
+      const userBets = betsSnap.docs.map(docSnap => ({
+        id: docSnap.id,
+        ...docSnap.data(),
+        timestamp: docSnap.data().timestamp.toDate(),
+        matchTime: docSnap.data().matchTime.toDate(),
+      } as PlacedBet));
+      setBets(userBets.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()));
+
+    } catch (error) {
+      console.error("Error fetching user wallet data:", error);
+      toast({ title: "Error", description: "Could not load wallet information.", variant: "destructive" });
+      setBalance(INITIAL_VIRTUAL_BALANCE); // Reset to default on error
+      setBets([]);
+    } finally {
+      setWalletLoading(false);
     }
-  }, [currentUser, storageKeySuffix]); // Re-run if user changes
+  }, [toast]);
 
   useEffect(() => {
-    localStorage.setItem(`virtualBalance${storageKeySuffix}`, balance.toString());
-  }, [balance, storageKeySuffix]);
+    if (authLoading) {
+      setWalletLoading(true); // Ensure wallet loading state reflects auth loading
+      return; // Return early if auth is still loading
+    }
+    if (currentUser) {
+      fetchUserWalletData(currentUser.uid);
+    } else {
+      // Handle guest user or logged-out state
+      setBalance(INITIAL_VIRTUAL_BALANCE); // Or load from guest local storage
+      setBets([]);
+      setWalletLoading(false);
+    }
+  }, [authLoading, currentUser, fetchUserWalletData]);
 
-  useEffect(() => {
-    localStorage.setItem(`virtualBets${storageKeySuffix}`, JSON.stringify(bets));
-  }, [bets, storageKeySuffix]);
 
-  const addFunds = useCallback((amount: number) => {
+  const addFunds = useCallback(async (amount: number) => {
     if (!currentUser) {
-      setTimeout(() => toast({ title: "Login Required", description: "Please log in to add funds.", variant: "destructive" }), 0);
+      toast({ title: "Login Required", description: "Please log in to add funds.", variant: "destructive" });
       return;
     }
     if (amount <= 0) {
-      setTimeout(() => toast({ title: "Invalid Amount", description: "Amount to add must be positive.", variant: "destructive" }), 0);
+      toast({ title: "Invalid Amount", description: "Amount to add must be positive.", variant: "destructive" });
       return;
     }
-    setBalance(prevBalance => parseFloat((prevBalance + amount).toFixed(2)));
-    // TODO: In Firestore, this would be an update to the user's balance field.
-    setTimeout(() => toast({ title: "Funds Added", description: `${amount} units added to your balance.`, className: "bg-primary text-primary-foreground" }), 0);
-  }, [currentUser, toast]);
-  
-  const updateBalance = useCallback((amount: number, description?: string) => {
-    if (!currentUser && amount < 0) { // Allow guest balance to be reduced (e.g. game bet) but not increased without login
-        // For guests, we might allow balance reduction but not addition.
-        // Or, if it's a general update (like from game win not tied to logged-in state), handle carefully.
-        // For now, we'll mostly assume logged-in for positive balance updates.
+
+    const userWalletRef = doc(db, "wallets", currentUser.uid);
+    try {
+      await updateDoc(userWalletRef, { balance: increment(amount) });
+      setBalance(prevBalance => parseFloat((prevBalance + amount).toFixed(2)));
+      toast({ title: "Funds Added", description: `${amount} units added to your balance.`, className: "bg-primary text-primary-foreground" });
+    } catch (error) {
+      console.error("Error adding funds:", error);
+      toast({ title: "Error", description: "Failed to add funds.", variant: "destructive" });
     }
+  }, [currentUser, toast]);
+
+  const updateBalance = useCallback((amount: number, description?: string) => {
+    // This is a local-only update, primarily for game logic that doesn't persist bets but affects balance.
+    // For persistent balance changes (like winning a match bet), the update should happen via Firestore triggers or server-side logic.
     setBalance(prevBalance => parseFloat((prevBalance + amount).toFixed(2)));
     if (description) {
-       setTimeout(() => toast({ title: "Balance Updated", description, className: "bg-primary text-primary-foreground" }), 0);
+       toast({ title: "Balance Updated", description, className: "bg-primary text-primary-foreground" });
+    }
+     // If currentUser exists, also update Firestore for non-bet related direct balance updates
+    if (currentUser && amount !== 0) { // Only update if there's a change and a user
+        const userWalletRef = doc(db, "wallets", currentUser.uid);
+        updateDoc(userWalletRef, { balance: increment(amount) }).catch(err => {
+            console.error("Error directly updating balance in Firestore from local updateBalance:", err);
+            // Potentially revert local change or notify user
+        });
     }
   }, [currentUser, toast]);
 
-
-  const placeBet = useCallback((matchId: string, matchDescription: string, selectedOutcome: string, stake: number, odds: number, matchTime: Date): boolean => {
+  const placeBet = useCallback(async (matchId: string, matchDescription: string, selectedOutcome: string, stake: number, odds: number, matchTime: Date): Promise<boolean> => {
     if (!currentUser) {
-      setTimeout(() => toast({ title: "Login Required", description: "Please log in to place bets.", variant: "destructive" }), 0);
+      toast({ title: "Login Required", description: "Please log in to place bets.", variant: "destructive" });
       return false;
     }
-    
+
     const validationResult = validateBetPlacement({
       betType: 'match',
       matchId,
       stake,
       currentBalance: balance,
-      existingBets: bets.filter(b => b.userId === currentUser.uid), // Validate against current user's bets
-      minBetAmount: MIN_BET_AMOUNT,
-      maxBetAmount: MAX_BET_AMOUNT,
+      existingBets: bets,
+      minBetAmount: undefined, // Use default
+      maxBetAmount: undefined, // Use default
+      isModalOpening: false,
     });
 
-    if (!validationResult.isValid && validationResult.error) {
-      setTimeout(() => toast({ title: validationResult.error.title, description: validationResult.error.description, variant: "destructive" }), 0);
+    if (validationResult && validationResult.error) {
+      toast({ title: validationResult.error.title, description: validationResult.error.description, variant: "destructive" });
       return false;
     }
-    
-    const newBet: PlacedBet = {
-      id: uuidv4(),
+
+    const newBet: Omit<PlacedBet, 'id'> = {
       matchId,
       matchDescription,
       selectedOutcome,
       stake,
       odds,
       potentialWinnings: parseFloat((stake * odds).toFixed(2)),
-      timestamp: new Date(), 
-      matchTime: matchTime, 
+      timestamp: new Date(),
+      matchTime: matchTime,
       status: 'pending',
       betType: 'match',
-      userId: currentUser.uid, // Associate bet with user
+      userId: currentUser.uid,
     };
 
-    setBalance(prevBalance => parseFloat((prevBalance - stake).toFixed(2)));
-    setBets(prevBets => [newBet, ...prevBets]);
-    // TODO: In Firestore, create a new bet document in a "bets" collection, associated with the user.
-    // TODO: Update user's balance in their Firestore document.
-    setTimeout(() => toast({ title: "Bet Placed!", description: `Successfully placed a ${stake} unit bet on ${selectedOutcome}. Potential win: ${newBet.potentialWinnings.toFixed(2)}.`, className: "bg-primary text-primary-foreground", duration: 3000 }), 0);
-    return true;
+    const userWalletRef = doc(db, "wallets", currentUser.uid);
+    const betDocRef = doc(collection(db, "bets")); // Auto-generate ID
+
+    try {
+      const batch = writeBatch(db);
+      batch.set(betDocRef, newBet);
+      batch.update(userWalletRef, { balance: increment(-stake) });
+      await batch.commit();
+
+      setBalance(prevBalance => parseFloat((prevBalance - stake).toFixed(2)));
+      setBets(prevBets => [{ id: betDocRef.id, ...newBet } as PlacedBet, ...prevBets].sort((a,b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()));
+      toast({ title: "Bet Placed!", description: `Successfully placed a ${stake} unit bet on ${selectedOutcome}. Potential win: ${newBet.potentialWinnings.toFixed(2)}.`, className: "bg-primary text-primary-foreground", duration: 3000 });
+      return true;
+    } catch (error) {
+      console.error("Error placing bet:", error);
+      toast({ title: "Bet Failed", description: "Could not place your bet due to a server error.", variant: "destructive" });
+      return false;
+    }
   }, [currentUser, balance, bets, toast]);
 
-  const placeGameBet = useCallback((gameType: GameType, stake: number, gameSpecificParams?: Record<string, any>): boolean => {
-    // Allow guest to place game bets, but their balance/bets won't persist across sessions without login.
-    // If currentUser exists, associate bet.
-    const userIdForBet = currentUser?.uid;
-
-    const validationResult = validateGameAction({
-      gameType,
-      actionType: 'place_bet',
-      stake,
-      currentBalance: balance,
-      minBetAmount: gameSpecificParams?.minBet ?? MIN_BET_AMOUNT, 
-      maxBetAmount: gameSpecificParams?.maxBet ?? MAX_BET_AMOUNT,
-      gameSpecificParams, // Pass through for potential specific game validation rules
-    });
-
-    if (!validationResult.isValid && validationResult.error) {
-        setTimeout(() => toast({ title: validationResult.error.title, description: validationResult.error.description, variant: "destructive" }), 0);
+  const placeGameBet = useCallback(async (gameType: LibGameType, stake: number, gameSpecificParams?: Record<string, any>): Promise<boolean> => {
+    if (!currentUser) {
+        toast({ title: "Login Required", description: "Please log in to play games.", variant: "destructive" });
         return false;
     }
-    
-    const newBet: PlacedBet = {
-        id: uuidv4(),
-        matchId: `${gameType}-${uuidv4()}`, 
-        matchDescription: `${gameType.charAt(0).toUpperCase() + gameType.slice(1)} Game`,
-        selectedOutcome: `Bet on ${gameType}`, 
-        stake,
-        odds: 1, // Placeholder, actual win depends on game logic (e.g., multiplier)
-        potentialWinnings: stake, // Placeholder, will be updated by game logic
-        timestamp: new Date(),
-        matchTime: new Date(), 
-        status: 'pending', // Game bets might resolve differently, e.g. 'cashed_out'
-        betType: 'game',
-        gameType: gameType,
-        gameSpecificParams,
-        userId: userIdForBet,
-    };
 
-    setBalance(prevBalance => parseFloat((prevBalance - stake).toFixed(2)));
-    setBets(prevBets => [newBet, ...prevBets]);
-    // TODO: If user logged in, store game bet in Firestore.
-    setTimeout(() => toast({ title: "Game Bet Placed!", description: `Successfully placed a ${stake} unit bet on the ${newBet.matchDescription}.`, className: "bg-primary text-primary-foreground", duration: 3000 }), 0);
-    return true;
+    const validationParams: GameActionValidationParams = {
+        gameType,
+        actionType: 'place_bet',
+        stake,
+        currentBalance: balance,
+        minBetAmount: gameSpecificParams?.minBet, // Pass through game specific limits
+        maxBetAmount: gameSpecificParams?.maxBet,
+        gameSpecificParams,
+    };
+    const validationResult = validateGameAction(validationParams);
+
+    if (validationResult && validationResult.error) {
+        toast({ title: validationResult.error.title, description: validationResult.error.description, variant: "destructive" });
+        return false;
+    }
+
+    // For game bets, we might not store them as persistently as match bets,
+    // or they might be ephemeral and only affect the balance.
+    // Here, we'll deduct balance and assume the game component handles its state.
+    const userWalletRef = doc(db, "wallets", currentUser.uid);
+    try {
+      await updateDoc(userWalletRef, { balance: increment(-stake) });
+      setBalance(prevBalance => parseFloat((prevBalance - stake).toFixed(2)));
+      // Optionally, log game bet for history, but not adding to main 'bets' state for now unless required
+      // This simplifies as game outcomes (win/loss) update balance directly via updateBalance.
+      toast({ title: `${gameType.charAt(0).toUpperCase() + gameType.slice(1)} Bet Placed!`, description: `Successfully placed a ${stake} unit bet.`, className: "bg-primary text-primary-foreground", duration: 3000 });
+      return true;
+    } catch (error) {
+        console.error(`Error placing ${gameType} game bet:`, error);
+        toast({ title: "Game Bet Failed", description: `Could not place your ${gameType} bet.`, variant: "destructive" });
+        return false;
+    }
   }, [currentUser, balance, toast]);
 
 
-  const withdrawBet = useCallback((betId: string) => {
+  const withdrawBet = useCallback(async (betId: string) => {
     if (!currentUser) {
-      setTimeout(() => toast({ title: "Login Required", description: "Please log in to manage your bets.", variant: "destructive" }), 0);
+      toast({ title: "Login Required", description: "Please log in to manage bets.", variant: "destructive" });
       return;
     }
     const betToWithdraw = bets.find(b => b.id === betId && b.userId === currentUser.uid);
 
     if (!betToWithdraw) {
-      setTimeout(() => toast({ title: "Error", description: "Bet not found or does not belong to you.", variant: "destructive" }), 0);
+      toast({ title: "Error", description: "Bet not found.", variant: "destructive" });
       return;
     }
-
     if (betToWithdraw.betType !== 'match') {
-      setTimeout(() => toast({ title: "Withdrawal Failed", description: "This bet type cannot be withdrawn.", variant: "destructive" }), 0);
+      toast({ title: "Withdrawal Failed", description: "This bet type cannot be withdrawn.", variant: "destructive" });
       return;
     }
-
     if (betToWithdraw.status !== 'pending') {
-      setTimeout(() => toast({ title: "Withdrawal Failed", description: `Cannot withdraw bet with status: ${betToWithdraw.status}.`, variant: "destructive" }), 0);
+      toast({ title: "Withdrawal Failed", description: `Bet is already ${betToWithdraw.status}.`, variant: "destructive" });
       return;
     }
-    
-    const eventTime = new Date(betToWithdraw.matchTime);
-    const timeNow = Date.now();
 
-    if (eventTime.getTime() - timeNow > BET_WITHDRAWAL_CUTOFF_MS) {
-      setBets(prevBets => prevBets.map(b => b.id === betId ? { ...b, status: 'withdrawn' } : b));
-      setBalance(prevBal => parseFloat((prevBal + betToWithdraw.stake).toFixed(2)));
-      // TODO: Update bet status and user balance in Firestore.
-      setTimeout(() => toast({ title: "Bet Withdrawn", description: `Your bet on ${betToWithdraw.matchDescription} has been withdrawn. ${betToWithdraw.stake} units refunded.`, className: "bg-primary text-primary-foreground" }), 0);
-    } else if (eventTime.getTime() < timeNow) {
-      setTimeout(() => toast({ title: "Withdrawal Failed", description: "Cannot withdraw, match has already started or finished.", variant: "destructive" }), 0);
-    } else {
-      setTimeout(() => toast({ title: "Withdrawal Failed", description: `Cannot withdraw, too close to match start (less than ${BET_WITHDRAWAL_CUTOFF_MS / 60000} minutes).`, variant: "destructive" }), 0);
+    const eventTime = new Date(betToWithdraw.matchTime).getTime();
+    if (eventTime - Date.now() <= BET_WITHDRAWAL_CUTOFF_MS) {
+      toast({ title: "Withdrawal Failed", description: `Too close to match start (less than ${BET_WITHDRAWAL_CUTOFF_MS / 60000} mins).`, variant: "destructive" });
+      return;
     }
-  }, [currentUser, bets, toast, setBalance, setBets]);
 
+    const betDocRef = doc(db, "bets", betId);
+    const userWalletRef = doc(db, "wallets", currentUser.uid);
+    try {
+      const batch = writeBatch(db);
+      batch.update(betDocRef, { status: 'withdrawn' });
+      batch.update(userWalletRef, { balance: increment(betToWithdraw.stake) });
+      await batch.commit();
 
-  const resolveBetsAndUpdateState = useCallback(() => {
-    // This logic will need significant updates when using Firestore,
-    // potentially moving to Cloud Functions for reliable, server-side resolution.
-    // For now, it simulates resolution for local state.
-    if (!currentUser) return; // Only resolve bets for logged-in users in this context
+      setBets(prevBets => prevBets.map(b => b.id === betId ? { ...b, status: 'withdrawn' as const } : b));
+      setBalance(prevBal => parseFloat((prevBal + betToWithdraw.stake).toFixed(2)));
+      toast({ title: "Bet Withdrawn", description: `Bet on ${betToWithdraw.matchDescription} withdrawn. ${betToWithdraw.stake} units refunded.`, className: "bg-primary text-primary-foreground" });
+    } catch (error) {
+      console.error("Error withdrawing bet:", error);
+      toast({ title: "Error", description: "Failed to withdraw bet.", variant: "destructive" });
+    }
+  }, [currentUser, bets, toast]);
 
+  // Note: Bet resolution (pending -> won/lost) should ideally be handled by a backend process (e.g., Cloud Function)
+  // to ensure reliability and not depend on the client being open.
+  // The client-side resolution below is a simplification for this project.
+  const resolveBetsAndUpdateState = useCallback(async () => {
+    if (!currentUser || bets.length === 0) return;
+
+    const pendingBetsToResolve = bets.filter(
+      bet => bet.userId === currentUser.uid &&
+             bet.betType === 'match' &&
+             bet.status === 'pending' &&
+             new Date(bet.matchTime).getTime() < Date.now() - MATCH_RESOLUTION_DELAY_MS
+    );
+
+    if (pendingBetsToResolve.length === 0) return;
+
+    const batch = writeBatch(db);
     let totalWinningsThisCycle = 0;
-    let betsChangedInLoop = false;
+    const updatedBetStatuses: { id: string, status: 'won' | 'lost', winnings?: number }[] = [];
 
-    const updatedBets = bets.map(bet => {
-        if (bet.userId === currentUser.uid && bet.betType === 'match' && bet.status === 'pending' && new Date(bet.matchTime).getTime() < Date.now() - MATCH_RESOLUTION_DELAY_MS) {
-            betsChangedInLoop = true;
-            const won = Math.random() < 0.4; 
-            if (won) {
-                totalWinningsThisCycle += bet.potentialWinnings;
-                setTimeout(() => toast({ title: "Bet Resolved!", description: `You WON ${bet.potentialWinnings.toFixed(2)} on ${bet.matchDescription}!`, className: "bg-primary text-primary-foreground animate-pulse", duration: 7000 }), 0);
-                return { ...bet, status: 'won' as const };
+    for (const bet of pendingBetsToResolve) {
+      const won = Math.random() < 0.4; // Simulate win/loss
+      const betDocRef = doc(db, "bets", bet.id);
+      if (won) {
+        batch.update(betDocRef, { status: 'won' });
+        totalWinningsThisCycle += bet.potentialWinnings;
+        updatedBetStatuses.push({ id: bet.id, status: 'won', winnings: bet.potentialWinnings });
+      } else {
+        batch.update(betDocRef, { status: 'lost' });
+        updatedBetStatuses.push({ id: bet.id, status: 'lost' });
+      }
+    }
+
+    if (totalWinningsThisCycle > 0) {
+      const userWalletRef = doc(db, "wallets", currentUser.uid);
+      batch.update(userWalletRef, { balance: increment(totalWinningsThisCycle) });
+    }
+
+    try {
+      await batch.commit();
+      // Update local state after successful Firestore update
+      setBets(prevBets =>
+        prevBets.map(pb => {
+          const resolved = updatedBetStatuses.find(ub => ub.id === pb.id);
+          return resolved ? { ...pb, status: resolved.status } : pb;
+        }).sort((a,b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
+      );
+      if (totalWinningsThisCycle > 0) {
+        setBalance(prevBalance => parseFloat((prevBalance + totalWinningsThisCycle).toFixed(2)));
+      }
+      // Show toasts after local state update
+      updatedBetStatuses.forEach(ub => {
+        const bet = pendingBetsToResolve.find(pb => pb.id === ub.id);
+        if(bet){
+            if(ub.status === 'won'){
+                 setTimeout(() => toast({ title: "Bet Resolved!", description: `You WON ${ub.winnings?.toFixed(2)} on ${bet.matchDescription}!`, className: "bg-primary text-primary-foreground animate-pulse", duration: 7000 }), 0);
             } else {
-                setTimeout(() => toast({ title: "Bet Resolved", description: `You lost your bet on ${bet.matchDescription}. Better luck next time!`, variant: "destructive", duration: 7000 }), 0);
-                return { ...bet, status: 'lost' as const };
+                 setTimeout(() => toast({ title: "Bet Resolved", description: `You lost your bet on ${bet.matchDescription}. Better luck next time!`, variant: "destructive", duration: 7000 }), 0);
             }
         }
-        return bet;
-    });
+      });
 
-    if (betsChangedInLoop) {
-        setBets(updatedBets);
-        if (totalWinningsThisCycle > 0) {
-            setBalance(prevBalance => parseFloat((prevBalance + totalWinningsThisCycle).toFixed(2)));
-        }
-        // TODO: Batch update bet statuses and user balance in Firestore.
+    } catch (error) {
+      console.error("Error resolving bets:", error);
     }
-  }, [currentUser, bets, setBalance, setBets, toast]);
+  }, [currentUser, bets, toast]);
+
 
   useEffect(() => {
-    if (!currentUser) return; // Don't run resolver if no user is logged in
+    if (!currentUser || authLoading || walletLoading) return;
     const intervalId = setInterval(() => {
         resolveBetsAndUpdateState();
-    }, 30000); 
+    }, 60000); // Check every minute
 
     return () => clearInterval(intervalId);
-  }, [currentUser, resolveBetsAndUpdateState]);
+  }, [currentUser, authLoading, walletLoading, resolveBetsAndUpdateState]);
 
+
+  const contextValue: VirtualWalletContextType = useMemo(() => ({
+    balance,
+    bets,
+    addFunds,
+    placeBet,
+    placeGameBet,
+    withdrawBet,
+    updateBalance, // Exposing this for direct local updates if needed by games
+    isLoading: authLoading || walletLoading,
+    fetchUserWalletData,
+  }), [balance, bets, addFunds, placeBet, placeGameBet, withdrawBet, updateBalance, authLoading, walletLoading, fetchUserWalletData]);
 
   return (
-    <VirtualWalletContext.Provider value={{ balance, bets: bets.filter(b => !currentUser || b.userId === currentUser.uid), addFunds, placeBet, placeGameBet, withdrawBet, updateBalance }}>
+    <VirtualWalletContext.Provider value={contextValue}>
       {children}
     </VirtualWalletContext.Provider>
   );
@@ -279,6 +363,8 @@ export const VirtualWalletProvider: React.FC<{ children: React.ReactNode }> = ({
 export const useVirtualWallet = (): VirtualWalletContextType => {
   const context = useContext(VirtualWalletContext);
   if (context === undefined) {
-    throw new Error('useVirtualWallet must be used within a VirtualWalletProvider');
+    // This error message is more specific now.
+    throw new Error('useVirtualWallet() hook is being called outside of a <VirtualWalletProvider>. This usually means a component that needs wallet access is not a descendant of VirtualWalletProvider. Please check your component tree.');
   }
+  return context;
 };
