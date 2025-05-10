@@ -39,6 +39,14 @@ export const VirtualWalletProvider: React.FC<{ children: React.ReactNode }> = ({
 
   const fetchUserWalletData = useCallback(async (userId: string) => {
     setWalletLoading(true);
+    if (!db) {
+      console.error("VirtualWalletContext: Firestore (db) is not initialized. Cannot fetch user wallet data.");
+      toast({ title: "Database Error", description: "Wallet service is currently unavailable. Please check your connection or Firebase setup.", variant: "destructive" });
+      setBalance(INITIAL_VIRTUAL_BALANCE); 
+      setBets([]);
+      setWalletLoading(false);
+      return;
+    }
     try {
       const userWalletRef = doc(db, "wallets", userId);
       const walletSnap = await getDoc(userWalletRef);
@@ -89,6 +97,11 @@ export const VirtualWalletProvider: React.FC<{ children: React.ReactNode }> = ({
       toast({ title: "Login Required", description: "Please log in to add funds.", variant: "destructive" });
       return;
     }
+    if (!db) {
+      console.error("VirtualWalletContext (addFunds): Firestore (db) is not initialized.");
+      toast({ title: "Database Error", description: "Fund service unavailable.", variant: "destructive" });
+      return;
+    }
     if (amount <= 0) {
       toast({ title: "Invalid Amount", description: "Amount to add must be positive.", variant: "destructive" });
       return;
@@ -111,6 +124,11 @@ export const VirtualWalletProvider: React.FC<{ children: React.ReactNode }> = ({
        toast({ title: "Balance Updated", description, className: "bg-primary text-primary-foreground" });
     }
     if (currentUser && amount !== 0) { 
+        if (!db) {
+          console.error("VirtualWalletContext (updateBalance): Firestore (db) is not initialized. Cannot update balance remotely.");
+          // Do not toast here as it might be too frequent, but log it.
+          return;
+        }
         const userWalletRef = doc(db, "wallets", currentUser.uid);
         updateDoc(userWalletRef, { balance: increment(amount) }).catch(err => {
             console.error("Error directly updating balance in Firestore from local updateBalance:", err);
@@ -121,6 +139,11 @@ export const VirtualWalletProvider: React.FC<{ children: React.ReactNode }> = ({
   const placeBet = useCallback(async (matchId: string, matchDescription: string, selectedOutcome: string, stake: number, odds: number, matchTime: Date): Promise<boolean> => {
     if (!currentUser) {
       toast({ title: "Login Required", description: "Please log in to place bets.", variant: "destructive" });
+      return false;
+    }
+     if (!db) {
+      console.error("VirtualWalletContext (placeBet): Firestore (db) is not initialized.");
+      toast({ title: "Database Error", description: "Betting service unavailable.", variant: "destructive" });
       return false;
     }
 
@@ -179,6 +202,11 @@ export const VirtualWalletProvider: React.FC<{ children: React.ReactNode }> = ({
         toast({ title: "Login Required", description: "Please log in to play games.", variant: "destructive" });
         return false;
     }
+    if (!db) {
+      console.error("VirtualWalletContext (placeGameBet): Firestore (db) is not initialized.");
+      toast({ title: "Database Error", description: "Game betting service unavailable.", variant: "destructive" });
+      return false;
+    }
 
     const validationParams: GameActionValidationParams = {
         gameType,
@@ -215,6 +243,11 @@ export const VirtualWalletProvider: React.FC<{ children: React.ReactNode }> = ({
   const withdrawBet = useCallback(async (betId: string) => {
     if (!currentUser) {
       toast({ title: "Login Required", description: "Please log in to manage bets.", variant: "destructive" });
+      return;
+    }
+    if (!db) {
+      console.error("VirtualWalletContext (withdrawBet): Firestore (db) is not initialized.");
+      toast({ title: "Database Error", description: "Bet withdrawal service unavailable.", variant: "destructive" });
       return;
     }
     const betToWithdraw = bets.find(b => b.id === betId && b.userId === currentUser.uid);
@@ -257,6 +290,12 @@ export const VirtualWalletProvider: React.FC<{ children: React.ReactNode }> = ({
   
   const resolveBetsAndUpdateState = useCallback(async () => {
     if (!currentUser || bets.length === 0) return;
+    if (!db) {
+      // Silently return if db not available, as this is a background task.
+      // Errors would have been shown during initial load or actions.
+      console.warn("VirtualWalletContext (resolveBetsAndUpdateState): Firestore (db) is not initialized. Skipping bet resolution.");
+      return;
+    }
 
     const pendingBetsToResolve = bets.filter(
       bet => bet.userId === currentUser.uid &&
@@ -325,13 +364,13 @@ export const VirtualWalletProvider: React.FC<{ children: React.ReactNode }> = ({
 
 
   useEffect(() => {
-    if (!currentUser || authLoading || walletLoading) return;
+    if (!currentUser || authLoading || walletLoading || !db) return; // Also check for db here
     const intervalId = setInterval(() => {
         resolveBetsAndUpdateState();
     }, 60000); 
 
     return () => clearInterval(intervalId);
-  }, [currentUser, authLoading, walletLoading, resolveBetsAndUpdateState]);
+  }, [currentUser, authLoading, walletLoading, resolveBetsAndUpdateState, db]); // Add db to dependency array
 
 
   const contextValue: VirtualWalletContextType = useMemo(() => ({
@@ -360,3 +399,4 @@ export const useVirtualWallet = (): VirtualWalletContextType => {
   }
   return context;
 };
+
