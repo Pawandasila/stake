@@ -1,6 +1,15 @@
 // src/types/index.ts
 import type { GameType as LibGameType } from '@/lib/validation'; // Import to re-export
 
+export type User = {
+  uid: string;
+  email: string | null;
+  displayName: string | null;
+  photoURL: string | null;
+  // Add any other user-specific fields you might need from Firebase Auth or your Firestore user doc
+  isAdmin?: boolean; // Example for admin role
+};
+
 export type Team = {
   id: string;
   name: string;
@@ -38,6 +47,7 @@ export type PlacedBet = {
   betType: 'match' | 'game'; // Distinguishes between sports match bets and game bets
   gameType?: GameType; // Specifies the type of game if betType is 'game'
   gameSpecificParams?: Record<string, any>; // Store any game-specific data like target multiplier for plane game
+  userId?: string; // To associate bet with a user
 };
 
 export type TeamPerformanceDataPoint = {

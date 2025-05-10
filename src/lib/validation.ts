@@ -4,9 +4,9 @@ import { MIN_BET_AMOUNT, MAX_BET_AMOUNT } from '@/lib/constants';
 
 export type GameType = 'plane' | 'dice' | 'roulette'; // Add more game types as needed
 
-interface ValidationError {
+export interface GameActionValidationResult {
   title: string;
-  description: string;
+  description: string; 
 }
 
 interface BaseValidationParams {
@@ -30,7 +30,7 @@ interface GameActionValidationParams extends BaseValidationParams {
 
 type ValidationParams = MatchBetValidationParams | GameActionValidationParams;
 
-export function validateBetPlacement(params: MatchBetValidationParams): ValidationError | null {
+export function validateBetPlacement(params: MatchBetValidationParams): GameActionValidationResult | null {
   const { stake, currentBalance, existingBets, matchId, minBetAmount = MIN_BET_AMOUNT, maxBetAmount = MAX_BET_AMOUNT } = params;
 
   if (isNaN(stake) || stake <= 0) {
@@ -60,7 +60,7 @@ export function validateBetPlacement(params: MatchBetValidationParams): Validati
   return null; // No validation errors
 }
 
-export function validateGameAction(params: GameActionValidationParams): ValidationError | null {
+export function validateGameAction(params: GameActionValidationParams): GameActionValidationResult | null {
   const { gameType, actionType, stake, currentBalance, minBetAmount = MIN_BET_AMOUNT, maxBetAmount = MAX_BET_AMOUNT } = params;
 
   if (actionType === 'place_bet') {
