@@ -1,134 +1,128 @@
 
 // src/lib/firebase.ts
-import { initializeApp, getApps, getApp, type FirebaseApp } from 'firebase/app';
+import { initializeApp, getApps, getApp, type FirebaseApp, type FirebaseOptions } from 'firebase/app';
 import { getAuth, GoogleAuthProvider, type Auth } from 'firebase/auth';
 import { getFirestore, type Firestore } from 'firebase/firestore';
 
+// Define these at the top level so they are either properly initialized or explicitly null.
 let app: FirebaseApp | undefined = undefined;
-let authInstance: Auth;
-let dbInstance: Firestore;
+let authInstance: Auth | null = null; // Initialize to null
+let dbInstance: Firestore | null = null; // Initialize to null
 const googleProvider = new GoogleAuthProvider();
 
-// Raw values from environment variables
-const rawEnvConfig = {
+// This object holds the configuration read from environment variables.
+const firebaseClientConfig = {
   apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
   authDomain: process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN,
   projectId: process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID,
   storageBucket: process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET,
   messagingSenderId: process.env.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID,
   appId: process.env.NEXT_PUBLIC_FIREBASE_APP_ID,
-  measurementId: process.env.NEXT_PUBLIC_FIREBASE_MEASUREMENT_ID,
+  measurementId: process.env.NEXT_PUBLIC_FIREBASE_MEASUREMENT_ID, // Optional, but include if set
 };
 
 if (typeof window !== 'undefined') {
-  console.log('%c[VictoryVision Firebase Debug] Raw environment variables for Firebase:', 'color: orange; font-weight: bold;', rawEnvConfig);
-}
+  // Log the raw environment variables as seen by the script
+  console.log('%c[VictoryVision Firebase Debug] Attempting to read Firebase config from environment variables:', 'color: orange; font-weight: bold;', {
+    NEXT_PUBLIC_FIREBASE_API_KEY: process.env.NEXT_PUBLIC_FIREBASE_API_KEY ? 'SET' : 'NOT SET or EMPTY',
+    NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN: process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN ? 'SET' : 'NOT SET or EMPTY',
+    NEXT_PUBLIC_FIREBASE_PROJECT_ID: process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID ? 'SET' : 'NOT SET or EMPTY',
+    NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET: process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET ? 'SET' : 'NOT SET or EMPTY',
+    NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID: process.env.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID ? 'SET' : 'NOT SET or EMPTY',
+    NEXT_PUBLIC_FIREBASE_APP_ID: process.env.NEXT_PUBLIC_FIREBASE_APP_ID ? 'SET' : 'NOT SET or EMPTY',
+    NEXT_PUBLIC_FIREBASE_MEASUREMENT_ID: process.env.NEXT_PUBLIC_FIREBASE_MEASUREMENT_ID ? 'SET' : 'NOT SET or EMPTY (Optional)',
+  });
 
-const firebaseConfig = { ...rawEnvConfig }; // Use a copy
+  // Log the config object that will be used for initialization checks
+  console.log('%c[VictoryVision Firebase Debug] Parsed Firebase config object:', 'color: blue; font-weight: bold;', firebaseClientConfig);
 
-if (typeof window !== 'undefined') {
-  const essentialKeys: (keyof typeof firebaseConfig)[] = ['apiKey', 'authDomain', 'projectId', 'appId'];
-  let configIsValid = true;
-  const missingOrEmptyKeys: string[] = [];
+  const essentialKeys: (keyof typeof firebaseClientConfig)[] = ['apiKey', 'authDomain', 'projectId', 'appId'];
+  const missingEssentialKeys = essentialKeys.filter(key => !firebaseClientConfig[key] || firebaseClientConfig[key]?.trim() === '');
 
-  for (const key of essentialKeys) {
-    const value = firebaseConfig[key];
-    if (typeof value !== 'string' || value.trim() === '') {
-      configIsValid = false;
-      missingOrEmptyKeys.push(`NEXT_PUBLIC_FIREBASE_${key.replace(/([A-Z0-9])/g, '_$1').substring(1).toUpperCase()}`);
-    }
-  }
-  
-  // projectId is critically important
-  if (!firebaseConfig.projectId || firebaseConfig.projectId.trim() === '') {
-    configIsValid = false;
-    if (!missingOrEmptyKeys.includes('NEXT_PUBLIC_FIREBASE_PROJECT_ID')) {
-      missingOrEmptyKeys.push('NEXT_PUBLIC_FIREBASE_PROJECT_ID');
-    }
-  }
-
-
-  if (!configIsValid) {
+  if (missingEssentialKeys.length > 0) {
     console.error(
-      `%c[VictoryVision Firebase Debug] FIREBASE CONFIGURATION ERROR:
-%cThe following essential Firebase environment variables are missing, empty, or not strings in your .env file:
-%c${missingOrEmptyKeys.join(', ')}
+      `%c[VictoryVision Firebase CRITICAL ERROR] FIREBASE INITIALIZATION FAILED:
+%cThe following essential Firebase environment variables are missing, empty, or invalid:
+%c${missingEssentialKeys.map(k => `NEXT_PUBLIC_FIREBASE_${k.replace(/([A-Z0-9])/g, '_$1').substring(1).toUpperCase()}`).join(', ')}
 
-%cPlease check the following:
-1. Your project root contains a '.env' or '.env.local' file.
-2. Inside this file, variables are defined like: NEXT_PUBLIC_FIREBASE_API_KEY="your_actual_key_here"
-3. The variable names EXACTLY match (e.g., NEXT_PUBLIC_FIREBASE_API_KEY). Ensure they start with NEXT_PUBLIC_.
-4. The values assigned are not empty (e.g., NEXT_PUBLIC_FIREBASE_PROJECT_ID="").
-5. You have FULLY STOPPED and RESTARTED your Next.js development server (e.g., Ctrl+C, then 'npm run dev' or 'yarn dev'). This includes deleting the .next folder if issues persist.
+%cFirebase services (Auth, Firestore) will NOT be available.
+%cTroubleshooting Steps:
+1. Verify that your '.env' or '.env.local' file exists in the project root.
+2. Ensure the variable names in the .env file EXACTLY match (e.g., NEXT_PUBLIC_FIREBASE_API_KEY). They MUST start with NEXT_PUBLIC_.
+3. Confirm that the values assigned to these variables are correct and not empty strings.
+4. CRITICAL: You MUST restart your Next.js development server (e.g., Ctrl+C, then 'npm run dev' or 'yarn dev') after making any changes to .env files.
+5. If deployed, ensure these environment variables are correctly set in your hosting provider's dashboard.
 
-Current configuration object that was attempted (values might be 'undefined' if not loaded from .env):`,
+%cCurrent problematic configuration values:`,
       'font-weight: bold; color: red; font-size: 16px;',
       'color: red;',
       'font-weight: bold; color: red;',
       'color: black;',
-      firebaseConfig // Log the raw config from env vars here
+      'color: black;',
+      'color: red; font-weight: bold;',
+       missingEssentialKeys.reduce((acc, key) => {
+        acc[key] = firebaseClientConfig[key] || 'MISSING/EMPTY';
+        return acc;
+      }, {} as Record<string, string>)
     );
-  }
+    // Explicitly set auth and db to null if essential config is missing
+    authInstance = null;
+    dbInstance = null;
+  } else {
+    // All essential keys appear to be present, proceed with initialization
+    const configForFirebaseSDK: Record<string, string> = {};
+    // Filter out any keys that might be null, undefined, or empty strings, even if not "essential"
+    for (const key in firebaseClientConfig) {
+      const typedKey = key as keyof typeof firebaseClientConfig;
+      const value = firebaseClientConfig[typedKey];
+      if (value && typeof value === 'string' && value.trim() !== '') {
+        configForFirebaseSDK[typedKey] = value;
+      }
+    }
+    
+    console.log('%c[VictoryVision Firebase Debug] Cleaned config object being passed to initializeApp:', 'color: green; font-weight: bold;', configForFirebaseSDK);
 
-  if (getApps().length === 0) {
-    if (configIsValid) {
+    if (getApps().length === 0) {
       try {
-        const configToInitialize: Record<string, string> = {};
-        let key: keyof typeof firebaseConfig;
-        for (key in firebaseConfig) {
-          if (firebaseConfig[key] && typeof firebaseConfig[key] === 'string' && (firebaseConfig[key] as string).trim() !== '') {
-            configToInitialize[key] = firebaseConfig[key]!;
-          }
-        }
-        
-        console.log('%c[VictoryVision Firebase Debug] Config object being passed to initializeApp:', 'color: blue; font-weight: bold;', configToInitialize);
-
-        let allEssentialInitialized = true;
-        for (const eKey of essentialKeys) {
-            if (!configToInitialize[eKey]) {
-                allEssentialInitialized = false;
-                 // missingOrEmptyKeys was for raw env check, re-evaluate for filtered config
-            }
-        }
-         if (!configToInitialize.projectId) { // Explicitly check projectId again for the filtered object
-            allEssentialInitialized = false;
-         }
-        
-        if (!allEssentialInitialized) {
-             console.error(`%c[VictoryVision Firebase Debug] Firebase Initialization Error: Not all essential config keys have values in the object passed to initializeApp. Filtered config:`, 'color: red; font-weight: bold;', configToInitialize);
-        } else {
-            app = initializeApp(configToInitialize as import('firebase/app').FirebaseOptions);
-            console.log("%c[VictoryVision Firebase Debug] Firebase app initialized successfully with config:", "color: green;", configToInitialize);
-        }
+        app = initializeApp(configForFirebaseSDK as FirebaseOptions);
+        console.log("%c[VictoryVision Firebase Debug] Firebase app initialized successfully via initializeApp().", "color: green;");
       } catch (e: any) {
-        console.error("%c[VictoryVision Firebase Debug] Firebase SDK initializeApp call FAILED. This often follows a configuration error or an issue with the Firebase project setup itself. Double-check API keys, project ID, and ensure Authentication service is enabled in your Firebase console. Error:", "color: red; font-weight: bold;", e, "Config attempted:", firebaseConfig);
+        console.error("%c[VictoryVision Firebase Debug] Firebase SDK initializeApp() FAILED. Error:", "color: red; font-weight: bold;", e, "Config attempted:", configForFirebaseSDK);
+        app = undefined; // Ensure app is undefined if init fails
       }
     } else {
-      console.warn("%c[VictoryVision Firebase Debug] Firebase app initialization SKIPPED due to invalid or missing configuration. See error logged above.", "color: orange; font-weight: bold;");
+      app = getApp();
+      console.log("%c[VictoryVision Firebase Debug] Firebase app already initialized. Using getApp().", "color: LIMEGREEN;"); // Changed color for distinction
     }
-  } else {
-    app = getApp();
-    // console.log("%c[VictoryVision Firebase Debug] Firebase app already initialized. Using existing app.", "color: orange;");
+
+    if (app) {
+      try {
+        // After getting an app instance (either new or existing), check its options
+        if (app.options && app.options.apiKey && app.options.projectId) {
+          authInstance = getAuth(app);
+          dbInstance = getFirestore(app);
+          console.log("%c[VictoryVision Firebase Debug] Firebase Auth and Firestore services successfully obtained from app instance.", "color: green;");
+        } else {
+          console.error("%c[VictoryVision Firebase Debug] Firebase app instance exists, but its options (apiKey/projectId) are missing or invalid. Auth/Firestore NOT initialized. App options:", "color: red; font-weight: bold;", app.options);
+          authInstance = null;
+          dbInstance = null;
+        }
+      } catch (error: any) {
+        console.error("%c[VictoryVision Firebase Debug] Error during getAuth() or getFirestore() call. Firebase app instance might be malformed or services not enabled in Firebase console. Error details:", "color: red; font-weight: bold;", error);
+        authInstance = null;
+        dbInstance = null;
+      }
+    } else {
+        console.error("%c[VictoryVision Firebase Debug] Firebase app instance is NOT available (either initializeApp failed or getApp returned unexpectedly). Auth/Firestore NOT initialized.", "color: red; font-weight: bold;");
+        authInstance = null; // Ensure they are null
+        dbInstance = null;
+    }
   }
+} else {
+  // This block runs on the server or in a non-browser environment.
+  // Firebase client SDK typically isn't initialized here for client-side auth.
+  // console.log("%c[VictoryVision Firebase Debug] Firebase client SDK initialization skipped (not in browser environment or window is undefined).", "color: gray;");
 }
 
-try {
-  if (app && app.name && typeof app.options?.apiKey === 'string' && app.options.apiKey.length > 0) { // Check if app is a valid FirebaseApp instance with an API key
-    authInstance = getAuth(app);
-    dbInstance = getFirestore(app);
-  } else {
-    if (typeof window !== 'undefined') {
-        console.error("%c[VictoryVision Firebase Debug] Firebase Auth and Firestore CANNOT be initialized because the Firebase app instance is NOT valid or missing critical config. This usually follows a configuration error (check logs above) or services not being enabled in Firebase console. Ensure NEXT_PUBLIC_FIREBASE_ environment variables are correctly set in your .env file and that the Next.js server has been FULLY RESTARTED. Current app object:", "color: red; font-weight: bold;", app);
-    }
-    // Provide non-functional stubs to prevent app crashes if auth/db are used before initialization
-    authInstance = { currentUser: null, onAuthStateChanged: () => (() => {}), signOut: async () => {}, signInWithPopup: async () => { throw new Error("Firebase Auth not initialized"); }, createUserWithEmailAndPassword: async () => { throw new Error("Firebase Auth not initialized"); }, signInWithEmailAndPassword: async () => { throw new Error("Firebase Auth not initialized"); }} as unknown as Auth;
-    dbInstance = { type: 'firestore-lite-stub' } as unknown as Firestore;
-  }
-} catch (error: any) {
-  console.error("%c[VictoryVision Firebase Debug] Error during getAuth() or getFirestore(). This typically means the Firebase app instance ('app') was not properly initialized, or the required services (Authentication, Firestore) are not enabled or correctly set up in your Firebase project console. Error details:", "color: red; font-weight: bold;", error, "Error code:", error?.code);
-  authInstance = { currentUser: null, onAuthStateChanged: () => (() => {}), signOut: async () => {}, signInWithPopup: async () => { throw new Error("Firebase Auth not initialized due to earlier error"); }, createUserWithEmailAndPassword: async () => { throw new Error("Firebase Auth not initialized"); }, signInWithEmailAndPassword: async () => { throw new Error("Firebase Auth not initialized"); }} as unknown as Auth;
-  dbInstance = { type: 'firestore-lite-stub-error' } as unknown as Firestore;
-}
-
+// Export the instances. They will be null if initialization failed.
 export { app, authInstance as auth, dbInstance as db, googleProvider };
-    
