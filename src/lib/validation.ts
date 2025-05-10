@@ -15,6 +15,10 @@ interface BaseValidationParams {
   minBetAmount?: number;
   maxBetAmount?: number;
 }
+export interface GameActionValidationResult {
+  title: string;
+  description: string; 
+}
 
 interface MatchBetValidationParams extends BaseValidationParams {
   betType: 'match';
@@ -22,7 +26,7 @@ interface MatchBetValidationParams extends BaseValidationParams {
   existingBets: PlacedBet[];
 }
 
-interface GameActionValidationParams extends BaseValidationParams {
+export interface GameActionValidationParams extends BaseValidationParams {
   gameType: GameType;
   actionType: 'place_bet' | 'cash_out' | 'other_action'; // Extend as needed
   // Add any game-specific parameters if necessary for validation
