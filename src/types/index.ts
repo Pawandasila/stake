@@ -6,8 +6,18 @@ export type User = {
   email: string | null;
   displayName: string | null;
   photoURL: string | null;
-  // Add any other user-specific fields you might need from Firebase Auth or your Firestore user doc
   isAdmin?: boolean; // Example for admin role
+  isProfileComplete?: boolean;
+  address?: string;
+  dob?: string; // Store as ISO string (YYYY-MM-DD)
+  // Bank details are placeholders for simulation
+  bankName?: string;
+  accountNumber?: string; 
+  // Consider more structured address if needed:
+  // addressLine1?: string;
+  // city?: string;
+  // postalCode?: string;
+  // country?: string;
 };
 
 export type Team = {
@@ -58,4 +68,14 @@ export type TeamPerformanceDataPoint = {
 export type TeamPerformance = {
   teamId: string;
   data: TeamPerformanceDataPoint[];
+};
+
+// For profile form
+export type ProfileFormData = {
+  displayName: string;
+  photoURL?: string;
+  address?: string;
+  dob?: string; // YYYY-MM-DD
+  bankName?: string;
+  accountNumber?: string;
 };

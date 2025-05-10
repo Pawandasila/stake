@@ -4,34 +4,39 @@
 import { useAuth } from '@/contexts/AuthContext';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { LogIn, ChromeIcon } from 'lucide-react'; // Using ChromeIcon as a placeholder for Google G
+import { LogIn } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { useEffect } from 'react';
 import Image from 'next/image';
-
+import LoginForm from '@/components/auth/LoginForm';
+import { Separator } from '@/components/ui/separator';
+import Link from 'next/link';
 
 export default function LoginPage() {
-  const { signInWithGoogle, currentUser, loading } = useAuth();
+  const { signInWithGoogle, currentUser, loading, isCheckingProfile } = useAuth();
   const router = useRouter();
 
   useEffect(() => {
-    if (!loading && currentUser) {
-      router.push('/'); // Redirect if already logged in
+     if (!loading && !isCheckingProfile && currentUser) {
+      if (currentUser.isProfileComplete) {
+        router.push('/'); 
+      } else {
+        router.push('/profile');
+      }
     }
-  }, [currentUser, loading, router]);
+  }, [currentUser, loading, isCheckingProfile, router]);
 
   const handleGoogleSignIn = async () => {
     try {
       await signInWithGoogle();
-      // Redirect is handled within signInWithGoogle or by useEffect
+      // Redirect is handled by useEffect or AuthContext
     } catch (error) {
       console.error("Login failed", error);
-      // Show error toast to user
+      // Toast is handled by AuthContext
     }
   };
 
-  if (loading || (!loading && currentUser)) {
-    // Show loading indicator or nothing if redirecting
+  if (loading || isCheckingProfile || (!loading && !isCheckingProfile && currentUser)) {
     return (
       <div className="fixed inset-0 z-[9999] flex flex-col items-center justify-center bg-background/90 backdrop-blur-sm">
         <LogIn className="h-16 w-16 animate-pulse text-primary mb-4" />
@@ -47,7 +52,7 @@ export default function LoginPage() {
           <LogIn className="mx-auto h-12 w-12 text-primary mb-3" />
           <CardTitle className="text-3xl font-bold">Welcome Back!</CardTitle>
           <CardDescription>
-            Sign in to access your Victory Vision dashboard and continue your simulated betting journey.
+            Sign in to access your Victory Vision dashboard.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-6">
@@ -61,8 +66,27 @@ export default function LoginPage() {
               Sign In with Google
             </div>
           </Button>
+
+          <div className="relative my-4">
+            <div className="absolute inset-0 flex items-center">
+              <span className="w-full border-t border-border" />
+            </div>
+            <div className="relative flex justify-center text-xs uppercase">
+              <span className="bg-card px-2 text-muted-foreground">
+                Or continue with
+              </span>
+            </div>
+          </div>
+
+          <LoginForm />
+          
           <p className="text-xs text-center text-muted-foreground">
             By signing in, you agree to our terms and conditions (simulation only).
+            <br />
+            Don't have an account?{' '}
+            <Link href="/signup" className="font-medium text-primary hover:underline">
+              Sign Up
+            </Link>
           </p>
         </CardContent>
       </Card>

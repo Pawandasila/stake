@@ -1,5 +1,5 @@
 
-"use client"; // Making this a client component to use useAuth hook
+"use client"; 
 
 import Header from '@/components/layout/Header';
 import Footer from '@/components/layout/Footer';
@@ -12,22 +12,31 @@ import { useAuth } from '@/contexts/AuthContext';
 import { Button } from '@/components/ui/button';
 import Link from 'next/link';
 import { ShieldQuestion, Trophy } from 'lucide-react';
+import { useRouter } from 'next/navigation';
+import { useEffect } from 'react';
+import Loading from './loading';
+
 
 export default function HomePage() {
-  const { currentUser, loading } = useAuth();
+  const { currentUser, loading, isCheckingProfile } = useAuth();
+  const router = useRouter();
 
-  // If still loading auth state, can show a loader or simplified page
-  if (loading) {
-    return (
-      <div className="flex flex-col min-h-screen bg-background text-foreground">
-        <Header />
-        <main className="flex-grow flex items-center justify-center">
-          <Trophy className="h-16 w-16 animate-spin text-primary" />
-        </main>
-        <Footer />
-      </div>
-    );
+  useEffect(() => {
+    if (!loading && !isCheckingProfile && currentUser && !currentUser.isProfileComplete) {
+      router.push('/profile');
+    }
+  }, [currentUser, loading, isCheckingProfile, router]);
+
+
+  if (loading || isCheckingProfile) {
+    return <Loading />;
   }
+  
+  // If profile is not complete and we haven't redirected yet (rare edge case, but good for robustness)
+  if (currentUser && !currentUser.isProfileComplete) {
+     return <Loading />; // Show loading while redirecting
+  }
+
 
   return (
     <div className="flex flex-col min-h-screen bg-background text-foreground">

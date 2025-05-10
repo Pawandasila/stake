@@ -4,7 +4,7 @@
 
 import Link from 'next/link';
 import Image from 'next/image';
-import { DollarSign, ShieldCheck, Landmark, Ticket, Rocket, LogIn, LogOut, UserCircle, Menu } from 'lucide-react';
+import { DollarSign, ShieldCheck, Landmark, Ticket, Rocket, LogIn, LogOut, UserCircle, Menu, UserCog } from 'lucide-react';
 import { APP_NAME } from '@/lib/constants';
 import { useVirtualWallet } from '@/contexts/VirtualWalletContext';
 import { useAuth } from '@/contexts/AuthContext';
@@ -29,10 +29,13 @@ const Header = () => {
   const getAvatarFallback = (name?: string | null) => {
     if (!name) return "VV";
     const parts = name.split(" ");
-    if (parts.length > 1) {
+    if (parts.length > 1 && parts[0] && parts[1]) {
       return parts[0][0].toUpperCase() + parts[1][0].toUpperCase();
     }
-    return name.substring(0, 2).toUpperCase();
+    if (name.length > 0) {
+     return name.substring(0, 2).toUpperCase();
+    }
+    return "VV";
   }
 
   return (
@@ -91,13 +94,20 @@ const Header = () => {
                 <DropdownMenuLabel className="font-normal">
                   <div className="flex flex-col space-y-1">
                     <p className="text-sm font-medium leading-none">{currentUser.displayName || "Victory User"}</p>
-                    <p className="text-xs leading-none text-muted-foreground">
-                      {currentUser.email}
-                    </p>
+                    {currentUser.email && (
+                       <p className="text-xs leading-none text-muted-foreground">
+                        {currentUser.email}
+                      </p>
+                    )}
                   </div>
                 </DropdownMenuLabel>
                 <DropdownMenuSeparator />
-                {/* Add more items like Profile, Settings here if needed */}
+                 <DropdownMenuItem asChild className="cursor-pointer">
+                  <Link href="/profile" className="flex items-center">
+                    <UserCog className="mr-2 h-4 w-4" />
+                    Profile
+                  </Link>
+                </DropdownMenuItem>
                  <DropdownMenuItem onClick={signOut} className="cursor-pointer text-destructive focus:text-destructive focus:bg-destructive/10">
                   <LogOut className="mr-2 h-4 w-4" />
                   Log out
@@ -136,6 +146,11 @@ const Header = () => {
                         <Ticket size={16} /> My Bets
                       </Link>
                     </DropdownMenuItem>
+                    <DropdownMenuItem asChild>
+                      <Link href="/profile" className="flex items-center gap-2">
+                        <UserCog size={16} /> Profile
+                      </Link>
+                    </DropdownMenuItem>
                   </>
                 )}
                 <DropdownMenuItem asChild>
@@ -164,4 +179,4 @@ const Header = () => {
   );
 };
 
-export default Header; // Ensure this line exists
+export default Header;

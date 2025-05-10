@@ -4,37 +4,43 @@
 import { useAuth } from '@/contexts/AuthContext';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { UserPlus, ChromeIcon } from 'lucide-react'; // Using ChromeIcon as a placeholder for Google G
+import { UserPlus, LogIn } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { useEffect } from 'react';
 import Image from 'next/image';
+import SignUpForm from '@/components/auth/SignUpForm';
+import { Separator } from '@/components/ui/separator';
+import Link from 'next/link';
 
 export default function SignUpPage() {
-  const { signInWithGoogle, currentUser, loading } = useAuth();
+  const { signInWithGoogle, currentUser, loading, isCheckingProfile } = useAuth();
   const router = useRouter();
 
   useEffect(() => {
-    if (!loading && currentUser) {
-      router.push('/'); // Redirect if already logged in
+    if (!loading && !isCheckingProfile && currentUser) {
+      if (currentUser.isProfileComplete) {
+        router.push('/'); 
+      } else {
+        router.push('/profile');
+      }
     }
-  }, [currentUser, loading, router]);
+  }, [currentUser, loading, isCheckingProfile, router]);
 
   const handleGoogleSignUp = async () => {
     try {
       await signInWithGoogle();
-      // Redirect is handled within signInWithGoogle or by useEffect
+      // Redirect is handled by useEffect or AuthContext
     } catch (error) {
       console.error("Sign up failed", error);
-      // Show error toast to user
+      // Toast is handled by AuthContext
     }
   };
 
-  if (loading || (!loading && currentUser)) {
-    // Show loading indicator or nothing if redirecting
+  if (loading || isCheckingProfile || (!loading && !isCheckingProfile && currentUser)) {
     return (
       <div className="fixed inset-0 z-[9999] flex flex-col items-center justify-center bg-background/90 backdrop-blur-sm">
         <UserPlus className="h-16 w-16 animate-pulse text-primary mb-4" />
-        <p className="text-xl font-semibold text-foreground">Setting up account...</p>
+        <p className="text-xl font-semibold text-foreground">Loading session...</p>
       </div>
     );
   }
@@ -60,23 +66,27 @@ export default function SignUpPage() {
                 Sign Up with Google
             </div>
           </Button>
-          {/* Placeholder for Email/Password sign up form if needed later */}
-          {/* <Separator className="my-4" />
-          <p className="text-center text-sm text-muted-foreground">Or sign up with email</p>
-          <form className="space-y-4">
-            <div>
-              <Label htmlFor="email">Email</Label>
-              <Input id="email" type="email" placeholder="you@example.com" />
+          
+          <div className="relative my-4">
+            <div className="absolute inset-0 flex items-center">
+              <span className="w-full border-t border-border" />
             </div>
-            <div>
-              <Label htmlFor="password">Password</Label>
-              <Input id="password" type="password" placeholder="••••••••" />
+            <div className="relative flex justify-center text-xs uppercase">
+              <span className="bg-card px-2 text-muted-foreground">
+                Or continue with
+              </span>
             </div>
-            <Button type="submit" className="w-full" disabled>Sign Up with Email (Coming Soon)</Button>
-          </form> */}
+          </div>
+
+          <SignUpForm />
+          
           <p className="text-xs text-center text-muted-foreground">
             By signing up, you agree to our terms and conditions (simulation only).
-            Already have an account? <a href="/login" className="text-primary hover:underline">Log In</a>
+            <br />
+            Already have an account?{' '}
+            <Link href="/login" className="font-medium text-primary hover:underline">
+              Log In
+            </Link>
           </p>
         </CardContent>
       </Card>
