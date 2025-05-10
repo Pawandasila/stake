@@ -1,3 +1,4 @@
+
 // src/lib/firebase.ts
 import { initializeApp, getApps, getApp, type FirebaseApp } from 'firebase/app';
 import { getAuth, GoogleAuthProvider, type Auth } from 'firebase/auth';
@@ -8,7 +9,8 @@ let authInstance: Auth;
 let dbInstance: Firestore;
 const googleProvider = new GoogleAuthProvider();
 
-const firebaseConfig = {
+// Raw values from environment variables
+const rawEnvConfig = {
   apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
   authDomain: process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN,
   projectId: process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID,
@@ -17,6 +19,12 @@ const firebaseConfig = {
   appId: process.env.NEXT_PUBLIC_FIREBASE_APP_ID,
   measurementId: process.env.NEXT_PUBLIC_FIREBASE_MEASUREMENT_ID,
 };
+
+if (typeof window !== 'undefined') {
+  console.log('%c[VictoryVision Firebase Debug] Raw environment variables for Firebase:', 'color: orange; font-weight: bold;', rawEnvConfig);
+}
+
+const firebaseConfig = { ...rawEnvConfig }; // Use a copy
 
 if (typeof window !== 'undefined') {
   const essentialKeys: (keyof typeof firebaseConfig)[] = ['apiKey', 'authDomain', 'projectId', 'appId'];
@@ -30,7 +38,8 @@ if (typeof window !== 'undefined') {
       missingOrEmptyKeys.push(`NEXT_PUBLIC_FIREBASE_${key.replace(/([A-Z0-9])/g, '_$1').substring(1).toUpperCase()}`);
     }
   }
-
+  
+  // projectId is critically important
   if (!firebaseConfig.projectId || firebaseConfig.projectId.trim() === '') {
     configIsValid = false;
     if (!missingOrEmptyKeys.includes('NEXT_PUBLIC_FIREBASE_PROJECT_ID')) {
@@ -38,9 +47,10 @@ if (typeof window !== 'undefined') {
     }
   }
 
+
   if (!configIsValid) {
     console.error(
-      `%cFIREBASE CONFIGURATION ERROR:
+      `%c[VictoryVision Firebase Debug] FIREBASE CONFIGURATION ERROR:
 %cThe following essential Firebase environment variables are missing, empty, or not strings in your .env file:
 %c${missingOrEmptyKeys.join(', ')}
 
@@ -56,7 +66,7 @@ Current configuration object that was attempted (values might be 'undefined' if 
       'color: red;',
       'font-weight: bold; color: red;',
       'color: black;',
-      firebaseConfig
+      firebaseConfig // Log the raw config from env vars here
     );
   }
 
@@ -71,50 +81,54 @@ Current configuration object that was attempted (values might be 'undefined' if 
           }
         }
         
+        console.log('%c[VictoryVision Firebase Debug] Config object being passed to initializeApp:', 'color: blue; font-weight: bold;', configToInitialize);
+
         let allEssentialInitialized = true;
         for (const eKey of essentialKeys) {
             if (!configToInitialize[eKey]) {
                 allEssentialInitialized = false;
-                if (!missingOrEmptyKeys.includes(`NEXT_PUBLIC_FIREBASE_${eKey.replace(/([A-Z0-9])/g, '_$1').substring(1).toUpperCase()}`)) {
-                    missingOrEmptyKeys.push(`NEXT_PUBLIC_FIREBASE_${eKey.replace(/([A-Z0-9])/g, '_$1').substring(1).toUpperCase()}`);
-                }
+                 // missingOrEmptyKeys was for raw env check, re-evaluate for filtered config
             }
         }
+         if (!configToInitialize.projectId) { // Explicitly check projectId again for the filtered object
+            allEssentialInitialized = false;
+         }
         
         if (!allEssentialInitialized) {
-             console.error(`%cFirebase Initialization Error: Not all essential config keys have values after filtering. Missing or empty: ${missingOrEmptyKeys.join(', ')}. Cannot initialize.`, 'color: red; font-weight: bold;', configToInitialize);
+             console.error(`%c[VictoryVision Firebase Debug] Firebase Initialization Error: Not all essential config keys have values in the object passed to initializeApp. Filtered config:`, 'color: red; font-weight: bold;', configToInitialize);
         } else {
             app = initializeApp(configToInitialize as import('firebase/app').FirebaseOptions);
-            console.log("%cFirebase app initialized successfully with config:", "color: green;", configToInitialize);
+            console.log("%c[VictoryVision Firebase Debug] Firebase app initialized successfully with config:", "color: green;", configToInitialize);
         }
-      } catch (e) {
-        console.error("Firebase SDK initializeApp call failed. This often follows a configuration error or an issue with the Firebase project setup itself. Double-check API keys, project ID, and ensure Authentication service is enabled in your Firebase console.", e);
+      } catch (e: any) {
+        console.error("%c[VictoryVision Firebase Debug] Firebase SDK initializeApp call FAILED. This often follows a configuration error or an issue with the Firebase project setup itself. Double-check API keys, project ID, and ensure Authentication service is enabled in your Firebase console. Error:", "color: red; font-weight: bold;", e, "Config attempted:", firebaseConfig);
       }
     } else {
-      console.warn("Firebase app initialization SKIPPED due to invalid or missing configuration. See error logged above.");
+      console.warn("%c[VictoryVision Firebase Debug] Firebase app initialization SKIPPED due to invalid or missing configuration. See error logged above.", "color: orange; font-weight: bold;");
     }
   } else {
     app = getApp();
-    // console.log("%cFirebase app already initialized. Using existing app.", "color: orange;");
+    // console.log("%c[VictoryVision Firebase Debug] Firebase app already initialized. Using existing app.", "color: orange;");
   }
 }
 
 try {
-  if (app && app.name) { // Check if app is a valid FirebaseApp instance
+  if (app && app.name && typeof app.options?.apiKey === 'string' && app.options.apiKey.length > 0) { // Check if app is a valid FirebaseApp instance with an API key
     authInstance = getAuth(app);
     dbInstance = getFirestore(app);
   } else {
     if (typeof window !== 'undefined') {
-        console.error("Firebase Auth and Firestore CANNOT be initialized because the Firebase app instance is NOT valid. This usually follows a configuration error (check logs above) or services not being enabled in Firebase console. Ensure NEXT_PUBLIC_FIREBASE_ environment variables are correctly set in your .env file and that the Next.js server has been FULLY RESTARTED.");
+        console.error("%c[VictoryVision Firebase Debug] Firebase Auth and Firestore CANNOT be initialized because the Firebase app instance is NOT valid or missing critical config. This usually follows a configuration error (check logs above) or services not being enabled in Firebase console. Ensure NEXT_PUBLIC_FIREBASE_ environment variables are correctly set in your .env file and that the Next.js server has been FULLY RESTARTED. Current app object:", "color: red; font-weight: bold;", app);
     }
     // Provide non-functional stubs to prevent app crashes if auth/db are used before initialization
-    authInstance = { currentUser: null, onAuthStateChanged: () => (() => {}), signOut: async () => {}, signInWithPopup: async () => { throw new Error("Firebase Auth not initialized"); }} as unknown as Auth;
+    authInstance = { currentUser: null, onAuthStateChanged: () => (() => {}), signOut: async () => {}, signInWithPopup: async () => { throw new Error("Firebase Auth not initialized"); }, createUserWithEmailAndPassword: async () => { throw new Error("Firebase Auth not initialized"); }, signInWithEmailAndPassword: async () => { throw new Error("Firebase Auth not initialized"); }} as unknown as Auth;
     dbInstance = { type: 'firestore-lite-stub' } as unknown as Firestore;
   }
 } catch (error: any) {
-  console.error("Error during getAuth() or getFirestore(). This typically means the Firebase app instance ('app') was not properly initialized, or the required services (Authentication, Firestore) are not enabled or correctly set up in your Firebase project console. Error details:", error, "Error code:", error?.code);
-  authInstance = { currentUser: null, onAuthStateChanged: () => (() => {}), signOut: async () => {}, signInWithPopup: async () => { throw new Error("Firebase Auth not initialized due to earlier error"); } } as unknown as Auth;
+  console.error("%c[VictoryVision Firebase Debug] Error during getAuth() or getFirestore(). This typically means the Firebase app instance ('app') was not properly initialized, or the required services (Authentication, Firestore) are not enabled or correctly set up in your Firebase project console. Error details:", "color: red; font-weight: bold;", error, "Error code:", error?.code);
+  authInstance = { currentUser: null, onAuthStateChanged: () => (() => {}), signOut: async () => {}, signInWithPopup: async () => { throw new Error("Firebase Auth not initialized due to earlier error"); }, createUserWithEmailAndPassword: async () => { throw new Error("Firebase Auth not initialized"); }, signInWithEmailAndPassword: async () => { throw new Error("Firebase Auth not initialized"); }} as unknown as Auth;
   dbInstance = { type: 'firestore-lite-stub-error' } as unknown as Firestore;
 }
 
 export { app, authInstance as auth, dbInstance as db, googleProvider };
+    
