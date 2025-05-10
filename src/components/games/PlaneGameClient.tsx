@@ -5,18 +5,20 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useVirtualWallet } from '@/contexts/VirtualWalletContext';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
+import { Label as ShadcnLabel } from '@/components/ui/label'; // Renamed to avoid conflict with Recharts Label
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
-import { AlertCircle, DollarSign, Target, Rocket, TrendingUp, Zap, CheckCircle2, XCircle } from 'lucide-react';
+import { DollarSign, Target, Rocket, CheckCircle2 } from 'lucide-react';
 import GsapAnimatedNumber from '../animations/GsapAnimatedNumber';
 import { useToast } from '@/hooks/use-toast';
+import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, ReferenceLine, Label as RechartsLabelComponent } from 'recharts'; // Imported Label as RechartsLabelComponent
 
 type GamePhase = 'idle' | 'betting' | 'running' | 'crashed' | 'cashed_out';
+type MultiplierDataPoint = { time: number; value: number };
 
 const MIN_BET = 1;
 const MAX_BET = 100;
 const MIN_MULTIPLIER_TARGET = 1.01;
-const MAX_MULTIPLIER_TARGET = 100; // Max auto cash-out target
+const MAX_MULTIPLIER_TARGET = 100;
 
 const PlaneGameClient = () => {
   const { balance, updateBalance } = useVirtualWallet();
@@ -30,6 +32,9 @@ const PlaneGameClient = () => {
   const [crashPoint, setCrashPoint] = useState<number>(0);
   const [message, setMessage] = useState<string>('Place your bet to start the game!');
   const [messageType, setMessageType] = useState<'info' | 'success' | 'error'>('info');
+
+  const [multiplierHistory, setMultiplierHistory] = useState<MultiplierDataPoint[]>([{ time: 0, value: 1.0 }]);
+  const [startTime, setStartTime] = useState<number | null>(null);
 
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
   const gameLogicTimeoutRef = useRef<NodeJS.Timeout | null>(null);
@@ -45,13 +50,11 @@ const PlaneGameClient = () => {
     }
   }, []);
 
-  // Cleanup on unmount
   useEffect(() => {
     return () => {
       stopGameInterval();
     };
   }, [stopGameInterval]);
-
 
   const handleBetAmountChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const value = e.target.value;
@@ -87,28 +90,35 @@ const PlaneGameClient = () => {
       return;
     }
 
-    updateBalance(-numericBetAmount); // Deduct bet amount
+    updateBalance(-numericBetAmount);
     setGamePhase('running');
     setCurrentMultiplier(1.00);
+    setMultiplierHistory([{ time: 0, value: 1.0 }]);
+    setStartTime(Date.now());
     
-    // Determine crash point ( skewed towards lower numbers, but can go high)
-    // Example: 60% chance crash < 2x, 30% < 5x, 10% >= 5x
     const randomFactor = Math.random();
     let determinedCrashPoint;
-    if (randomFactor < 0.05) determinedCrashPoint = 1.00; // Instant crash 5%
-    else if (randomFactor < 0.60) determinedCrashPoint = 1.01 + Math.random() * (2 - 1.01); // up to 2x
-    else if (randomFactor < 0.90) determinedCrashPoint = 2 + Math.random() * (5 - 2);   // up to 5x
-    else determinedCrashPoint = 5 + Math.random() * (20 - 5); // up to 20x (can be higher)
+    if (randomFactor < 0.05) determinedCrashPoint = 1.00; 
+    else if (randomFactor < 0.60) determinedCrashPoint = 1.01 + Math.random() * (2 - 1.01);
+    else if (randomFactor < 0.90) determinedCrashPoint = 2 + Math.random() * (5 - 2);
+    else determinedCrashPoint = 5 + Math.random() * (20 - 5); 
     
     setCrashPoint(parseFloat(determinedCrashPoint.toFixed(2)));
     setMessage('Plane taking off... Cash out before it flies away!');
     setMessageType('info');
 
-    stopGameInterval(); // Clear any existing intervals
+    stopGameInterval();
 
     intervalRef.current = setInterval(() => {
-      setCurrentMultiplier(prev => parseFloat((prev + 0.01 + (prev * 0.005)).toFixed(2))); // Slightly accelerating
-    }, 100); // Update multiplier faster
+      setCurrentMultiplier(prev => {
+        const newValue = parseFloat((prev + 0.01 + (prev * 0.005)).toFixed(2)); // Slightly accelerating
+        if (startTime) {
+          const elapsedTime = (Date.now() - startTime) / 1000; 
+          setMultiplierHistory(prevHistory => [...prevHistory, { time: elapsedTime, value: newValue }]);
+        }
+        return newValue;
+      });
+    }, 100); 
   };
 
   const handleCashOut = useCallback(() => {
@@ -133,6 +143,17 @@ const PlaneGameClient = () => {
       if (currentMultiplier >= crashPoint) {
         stopGameInterval();
         setGamePhase('crashed');
+        // Ensure the crash point is the last point in history if it wasn't naturally reached
+        if (startTime) {
+            const elapsedTime = (Date.now() - startTime) / 1000;
+            setMultiplierHistory(prevHistory => {
+                if (prevHistory[prevHistory.length -1].value < crashPoint) {
+                   return [...prevHistory, { time: elapsedTime, value: crashPoint }];
+                }
+                return prevHistory;
+            });
+        }
+        setCurrentMultiplier(crashPoint); // Set final multiplier to crash point
         setMessage(`Oh no! Plane flew away at ${crashPoint.toFixed(2)}x.`);
         setMessageType('error');
         toast({
@@ -141,20 +162,21 @@ const PlaneGameClient = () => {
           variant: "destructive",
         });
       } else {
-        // Auto cash-out if target is met
         const numericTargetMultiplier = parseFloat(targetMultiplier);
         if (!isNaN(numericTargetMultiplier) && currentMultiplier >= numericTargetMultiplier) {
           handleCashOut();
         }
       }
     }
-  }, [currentMultiplier, crashPoint, gamePhase, targetMultiplier, handleCashOut, stopGameInterval, toast]);
+  }, [currentMultiplier, crashPoint, gamePhase, targetMultiplier, handleCashOut, stopGameInterval, toast, startTime]);
 
 
   const resetGame = () => {
     stopGameInterval();
     setGamePhase('idle');
     setCurrentMultiplier(1.00);
+    setMultiplierHistory([{ time: 0, value: 1.0 }]);
+    setStartTime(null);
     setMessage('Place your bet to start the game!');
     setMessageType('info');
   };
@@ -169,7 +191,7 @@ const PlaneGameClient = () => {
     <Card className="w-full shadow-xl">
       <CardHeader>
         <div className="flex items-center justify-center gap-2 text-primary mb-2">
-            <Rocket size={32} className={gamePhase === 'running' ? 'animate-ping': ''} />
+            <Rocket size={32} className={gamePhase === 'running' ? 'animate-pulse': ''} />
             <CardTitle className="text-3xl font-bold">Plane Game</CardTitle>
         </div>
         <CardDescription className="text-center">
@@ -177,29 +199,81 @@ const PlaneGameClient = () => {
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-6">
-        {/* Game Display */}
-        <div className="h-48 flex flex-col items-center justify-center bg-card-foreground/5 rounded-lg p-6 border border-border relative overflow-hidden">
-          {gamePhase === 'running' && (
-             <TrendingUp className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 h-32 w-32 text-primary/10 opacity-50" />
-          )}
-           {gamePhase === 'crashed' && (
-             <Zap className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 h-32 w-32 text-destructive/20 opacity-70" />
-          )}
-          {gamePhase === 'cashed_out' && (
-             <CheckCircle2 className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 h-32 w-32 text-primary/20 opacity-70" />
-          )}
+        <div className="min-h-[280px] md:min-h-[320px] flex flex-col items-center justify-between bg-card-foreground/5 rounded-lg p-4 border border-border relative overflow-hidden">
+          <div className="text-center z-10 py-2">
+            <p className="text-5xl md:text-6xl font-bold text-primary">
+              <GsapAnimatedNumber value={currentMultiplier} precision={2} duration={0.1} />x
+            </p>
+            <p className={`mt-1 text-xs md:text-sm font-medium ${getMessageColor()}`}>{message}</p>
+          </div>
 
-          <p className="text-6xl font-bold text-primary z-10">
-            <GsapAnimatedNumber value={currentMultiplier} precision={2} duration={0.1} />x
-          </p>
-          <p className={`mt-2 text-sm font-medium z-10 ${getMessageColor()}`}>{message}</p>
+          <div className="w-full h-[150px] md:h-[180px] z-0 mt-2">
+            <ResponsiveContainer width="100%" height="100%">
+              <LineChart data={multiplierHistory} margin={{ top: 5, right: 25, left: -15, bottom: 5 }}>
+                <XAxis 
+                  dataKey="time" 
+                  type="number" 
+                  domain={['dataMin', 'dataMax']} 
+                  tickFormatter={(tick) => `${tick.toFixed(0)}s`}
+                  stroke="hsl(var(--muted-foreground))"
+                  fontSize={10}
+                  interval="preserveStartEnd"
+                  tickCount={5}
+                />
+                <YAxis 
+                  dataKey="value" 
+                  type="number" 
+                  domain={[1, 'dataMax + 0.5']} 
+                  allowDataOverflow 
+                  tickFormatter={(tick) => `${tick.toFixed(1)}x`}
+                  stroke="hsl(var(--muted-foreground))"
+                  fontSize={10}
+                  mirror={gamePhase === 'crashed'}
+                />
+                <Tooltip
+                  contentStyle={{
+                    backgroundColor: 'hsl(var(--popover))',
+                    borderColor: 'hsl(var(--border))',
+                    borderRadius: 'var(--radius)',
+                    color: 'hsl(var(--popover-foreground))'
+                  }}
+                  itemStyle={{ color: 'hsl(var(--primary))' }}
+                  formatter={(value: number) => [`${value.toFixed(2)}x`, "Multiplier"]}
+                  labelFormatter={(label: number) => `Time: ${label.toFixed(1)}s`}
+                  cursor={{ stroke: 'hsl(var(--primary))', strokeWidth: 1, strokeDasharray: '3 3' }}
+                />
+                <Line 
+                  type="monotone" 
+                  dataKey="value" 
+                  stroke={gamePhase === 'crashed' ? "hsl(var(--destructive))" : "hsl(var(--primary))"}
+                  strokeWidth={3} 
+                  dot={false} 
+                  isAnimationActive={false}
+                />
+                {gamePhase === 'crashed' && crashPoint > 0 && (
+                  <ReferenceLine y={crashPoint} stroke="hsl(var(--destructive))" strokeDasharray="4 4" ifOverflow="extendDomain">
+                    <RechartsLabelComponent value={`Crashed @ ${crashPoint.toFixed(2)}x`} position="top" fill="hsl(var(--destructive))" fontSize={10} dy={-5} />
+                  </ReferenceLine>
+                )}
+                 {gamePhase === 'cashed_out' && (
+                    <ReferenceLine y={currentMultiplier} stroke="hsl(var(--primary))" strokeDasharray="4 4" ifOverflow="extendDomain">
+                        <RechartsLabelComponent value={`Cashed @ ${currentMultiplier.toFixed(2)}x`} position="top" fill="hsl(var(--primary))" fontSize={10} dy={-5} />
+                    </ReferenceLine>
+                )}
+                {(gamePhase === 'running' || gamePhase === 'betting' || gamePhase === 'idle') && parseFloat(targetMultiplier) >= MIN_MULTIPLIER_TARGET && (
+                   <ReferenceLine y={parseFloat(targetMultiplier)} stroke="hsl(var(--secondary))" strokeDasharray="3 3" ifOverflow="extendDomain">
+                     <RechartsLabelComponent value={`Target @ ${parseFloat(targetMultiplier).toFixed(2)}x`} position="top" fill="hsl(var(--secondary))" fontSize={10} dy={-5} />
+                   </ReferenceLine>
+                )}
+              </LineChart>
+            </ResponsiveContainer>
+          </div>
         </div>
 
-        {/* Controls */}
         { (gamePhase === 'idle' || gamePhase === 'betting' || gamePhase === 'crashed' || gamePhase === 'cashed_out') && (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-end">
             <div>
-              <Label htmlFor="bet-amount-plane" className="font-semibold">Bet Amount ({MIN_BET}-{MAX_BET})</Label>
+              <ShadcnLabel htmlFor="bet-amount-plane" className="font-semibold">Bet Amount ({MIN_BET}-{MAX_BET})</ShadcnLabel>
               <div className="relative mt-1">
                  <DollarSign className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-muted-foreground" />
                 <Input
@@ -213,7 +287,7 @@ const PlaneGameClient = () => {
               </div>
             </div>
             <div>
-              <Label htmlFor="target-multiplier-plane" className="font-semibold">Auto Cash Out At (Optional)</Label>
+              <ShadcnLabel htmlFor="target-multiplier-plane" className="font-semibold">Auto Cash Out At (Optional)</ShadcnLabel>
                <div className="relative mt-1">
                  <Target className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-muted-foreground" />
                 <Input
