@@ -59,11 +59,11 @@ export const VirtualWalletProvider: React.FC<{ children: React.ReactNode }> = ({
 
   const addFunds = useCallback((amount: number) => {
     if (amount <= 0) {
-      toast({ title: "Invalid Amount", description: "Amount to add must be positive.", variant: "destructive" });
+      setTimeout(() => toast({ title: "Invalid Amount", description: "Amount to add must be positive.", variant: "destructive" }), 0);
       return;
     }
     setBalance(prevBalance => parseFloat((prevBalance + amount).toFixed(2)));
-    toast({ title: "Funds Added", description: `${amount} units added to your balance.`, className: "bg-primary text-primary-foreground" });
+    setTimeout(() => toast({ title: "Funds Added", description: `${amount} units added to your balance.`, className: "bg-primary text-primary-foreground" }), 0);
   }, [toast]);
   
   const updateBalance = useCallback((amount: number) => {
@@ -73,11 +73,11 @@ export const VirtualWalletProvider: React.FC<{ children: React.ReactNode }> = ({
 
   const placeBet = useCallback((matchId: string, matchDescription: string, selectedOutcome: string, stake: number, odds: number, matchTime: Date): boolean => {
     if (stake < MIN_BET_AMOUNT) {
-      toast({ title: "Invalid Amount", description: `Minimum bet amount is ${MIN_BET_AMOUNT}.`, variant: "destructive" });
+      setTimeout(() => toast({ title: "Invalid Amount", description: `Minimum bet amount is ${MIN_BET_AMOUNT}.`, variant: "destructive" }), 0);
       return false;
     }
     if (balance < stake) {
-      toast({ title: "Insufficient Funds", description: "You don't have enough balance to place this bet.", variant: "destructive" });
+      setTimeout(() => toast({ title: "Insufficient Funds", description: "You don't have enough balance to place this bet.", variant: "destructive" }), 0);
       return false;
     }
     
@@ -96,7 +96,7 @@ export const VirtualWalletProvider: React.FC<{ children: React.ReactNode }> = ({
 
     setBalance(prevBalance => parseFloat((prevBalance - stake).toFixed(2)));
     setBets(prevBets => [newBet, ...prevBets]);
-    toast({ title: "Bet Placed!", description: `Successfully placed a ${stake} unit bet on ${selectedOutcome}. Potential win: ${newBet.potentialWinnings.toFixed(2)}.`, className: "bg-primary text-primary-foreground", duration: 3000 });
+    setTimeout(() => toast({ title: "Bet Placed!", description: `Successfully placed a ${stake} unit bet on ${selectedOutcome}. Potential win: ${newBet.potentialWinnings.toFixed(2)}.`, className: "bg-primary text-primary-foreground", duration: 3000 }), 0);
     return true;
   }, [balance, toast]);
 
@@ -105,7 +105,7 @@ export const VirtualWalletProvider: React.FC<{ children: React.ReactNode }> = ({
     setBets(prevBets => {
       const betIndex = prevBets.findIndex(b => b.id === betId);
       if (betIndex === -1) {
-        toast({ title: "Error", description: "Bet not found.", variant: "destructive" });
+        setTimeout(() => toast({ title: "Error", description: "Bet not found.", variant: "destructive" }), 0);
         return prevBets;
       }
       const bet = prevBets[betIndex];
@@ -114,17 +114,17 @@ export const VirtualWalletProvider: React.FC<{ children: React.ReactNode }> = ({
       if (eventTime.getTime() - Date.now() > BET_WITHDRAWAL_CUTOFF_MS) {
         const newBalance = parseFloat((balance + bet.stake).toFixed(2));
         setBalance(newBalance);
-        toast({ title: "Bet Withdrawn", description: `Your bet on ${bet.matchDescription} has been withdrawn. ${bet.stake} units refunded.`, className: "bg-primary text-primary-foreground" });
+        setTimeout(() => toast({ title: "Bet Withdrawn", description: `Your bet on ${bet.matchDescription} has been withdrawn. ${bet.stake} units refunded.`, className: "bg-primary text-primary-foreground" }), 0);
          const updatedBets = [...prevBets];
          updatedBets[betIndex] = { ...bet, status: 'withdrawn' };
          return updatedBets;
 
       } else if (eventTime.getTime() < Date.now()) {
-         toast({ title: "Withdrawal Failed", description: "Cannot withdraw, match has already started or finished.", variant: "destructive" });
+         setTimeout(() => toast({ title: "Withdrawal Failed", description: "Cannot withdraw, match has already started or finished.", variant: "destructive" }), 0);
          return prevBets;
       }
       else {
-        toast({ title: "Withdrawal Failed", description: `Cannot withdraw, too close to match start (less than ${BET_WITHDRAWAL_CUTOFF_MS / 60000} minutes).`, variant: "destructive" });
+        setTimeout(() => toast({ title: "Withdrawal Failed", description: `Cannot withdraw, too close to match start (less than ${BET_WITHDRAWAL_CUTOFF_MS / 60000} minutes).`, variant: "destructive" }), 0);
         return prevBets;
       }
     });
@@ -142,10 +142,10 @@ export const VirtualWalletProvider: React.FC<{ children: React.ReactNode }> = ({
             const won = Math.random() < 0.4; 
             if (won) {
                 totalWinningsThisCycle += bet.potentialWinnings;
-                toast({ title: "Bet Resolved!", description: `You WON ${bet.potentialWinnings.toFixed(2)} on ${bet.matchDescription}!`, className: "bg-primary text-primary-foreground animate-pulse", duration: 7000 });
+                setTimeout(() => toast({ title: "Bet Resolved!", description: `You WON ${bet.potentialWinnings.toFixed(2)} on ${bet.matchDescription}!`, className: "bg-primary text-primary-foreground animate-pulse", duration: 7000 }), 0);
                 return { ...bet, status: 'won' as const };
             } else {
-                toast({ title: "Bet Resolved", description: `You lost your bet on ${bet.matchDescription}. Better luck next time!`, variant: "destructive", duration: 7000 });
+                setTimeout(() => toast({ title: "Bet Resolved", description: `You lost your bet on ${bet.matchDescription}. Better luck next time!`, variant: "destructive", duration: 7000 }), 0);
                 return { ...bet, status: 'lost' as const };
             }
         }
