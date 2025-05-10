@@ -248,7 +248,7 @@ const PlaneGameClient = () => {
                   stroke={gamePhase === 'crashed' ? "hsl(var(--destructive))" : "hsl(var(--primary))"}
                   strokeWidth={3} 
                   dot={false} 
-                  isAnimationActive={false}
+                  isAnimationActive={true} // Changed to true for animated graph updates
                 />
                 {gamePhase === 'crashed' && crashPoint > 0 && (
                   <ReferenceLine y={crashPoint} stroke="hsl(var(--destructive))" strokeDasharray="4 4" ifOverflow="extendDomain">
