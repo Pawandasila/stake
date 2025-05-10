@@ -17,42 +17,42 @@ body {
     --popover: 224 71% 6%; /* Darker Popover */
     --popover-foreground: 210 40% 98%;
 
-    --primary: 111 100% 50%; /* Vibrant Green #39FF14 */
-    --primary-foreground: 224 71% 4%; /* Dark text for contrast on green */
+    --primary: 205 90% 50%; /* New Primary Blue */
+    --primary-foreground: 210 40% 98%; /* Light text for new primary */
 
-    --secondary: 210 100% 60%; /* Vibrant Blue - NEW Secondary Accent */
-    --secondary-foreground: 210 40% 98%; /* Light text for contrast on blue */
+    --secondary: 175 70% 40%; /* New Secondary Teal */
+    --secondary-foreground: 210 40% 98%; /* Light text for new secondary */
 
     --muted: 220 25% 20%; /* Darker, desaturated Blue/Grey for muted elements */
     --muted-foreground: 210 30% 70%; /* Lighter Muted Foreground for readability */
 
-    --accent: 111 100% 50%; /* Vibrant Green (Primary interactive accent) */
-    --accent-foreground: 224 71% 4%; /* Dark text for contrast on green */
+    --accent: 205 90% 50%; /* New Accent (same as new primary blue) */
+    --accent-foreground: 210 40% 98%; /* Light text for new blue accent */
 
     --destructive: 0 72% 51%; /* Brighter Red */
     --destructive-foreground: 210 40% 98%;
 
     --border: 220 30% 25%; /* Slightly bluer, darker border */
     --input: 220 25% 15%; /* Darker, bluer Input Background */
-    --ring: 111 100% 57%; /* Vibrant Green Ring for primary focus */
+    --ring: 205 90% 55%; /* New Ring (brighter version of primary blue for focus) */
 
     --radius: 0.5rem;
 
     /* Chart colors */
-    --chart-1: 111 100% 50%; /* Green - Primary Accent */
-    --chart-2: 210 100% 60%; /* Blue - Secondary Accent */
+    --chart-1: 205 90% 50%; /* Primary Blue */
+    --chart-2: 175 70% 40%; /* Secondary Teal */
     --chart-3: 270 80% 65%; /* Purple - for diversity */
     --chart-4: 30 100% 55%;  /* Orange - for contrast */
     --chart-5: 0 80% 60%;   /* Red - for negative/warning */
     
     --sidebar-background: 224 71% 6%;
     --sidebar-foreground: 210 40% 85%;
-    --sidebar-primary: 111 100% 50%; /* Green for sidebar primary actions */
-    --sidebar-primary-foreground: 224 71% 4%;
+    --sidebar-primary: 205 90% 50%; /* New Primary Blue for sidebar primary actions */
+    --sidebar-primary-foreground: 210 40% 98%; /* Light text for new sidebar primary */
     --sidebar-accent: 220 30% 22%; /* Bluer dark accent for sidebar */
     --sidebar-accent-foreground: 210 40% 98%;
     --sidebar-border: 220 25% 18%; /* Bluer dark border for sidebar */
-    --sidebar-ring: 111 100% 57%; /* Green for sidebar focus */
+    --sidebar-ring: 205 90% 55%; /* New Primary Blue for sidebar focus */
   }
 
 }
@@ -67,3 +67,4 @@ body {
     -moz-osx-font-smoothing: grayscale;
   }
 }
+
