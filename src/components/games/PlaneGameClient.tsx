@@ -37,20 +37,21 @@ const PlaneGameClient = () => {
   const [startTime, setStartTime] = useState<number | null>(null);
 
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
-  const gameLogicTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const gameLogicTimeoutRef = useRef<NodeJS.Timeout | null>(null); // Not strictly needed with current useEffect structure
 
   const stopGameInterval = useCallback(() => {
     if (intervalRef.current) {
       clearInterval(intervalRef.current);
       intervalRef.current = null;
     }
-    if (gameLogicTimeoutRef.current) {
+    if (gameLogicTimeoutRef.current) { // Clear if used
       clearTimeout(gameLogicTimeoutRef.current);
       gameLogicTimeoutRef.current = null;
     }
   }, []);
 
   useEffect(() => {
+    // Cleanup interval on component unmount
     return () => {
       stopGameInterval();
     };
@@ -85,15 +86,17 @@ const PlaneGameClient = () => {
       return;
     }
     if (isNaN(numericTargetMultiplier) || numericTargetMultiplier < MIN_MULTIPLIER_TARGET || numericTargetMultiplier > MAX_MULTIPLIER_TARGET) {
-      setMessage(`Target multiplier must be between ${MIN_MULTIPLIER_TARGET}x and ${MAX_MULTIPLIER_TARGET}x.`);
-      setMessageType('error');
-      return;
+        if (targetMultiplier !== "" && !(parseFloat(targetMultiplier) >=MIN_MULTIPLIER_TARGET) ) { // Allow empty target
+             setMessage(`Target multiplier must be between ${MIN_MULTIPLIER_TARGET}x and ${MAX_MULTIPLIER_TARGET}x, or empty.`);
+             setMessageType('error');
+             return;
+        }
     }
 
     updateBalance(-numericBetAmount);
     setGamePhase('running');
     setCurrentMultiplier(1.00);
-    setMultiplierHistory([{ time: 0, value: 1.0 }]);
+    setMultiplierHistory([{ time: 0, value: 1.0 }]); // Reset history for the new game
     setStartTime(Date.now());
     
     const randomFactor = Math.random();
@@ -107,15 +110,24 @@ const PlaneGameClient = () => {
     setMessage('Plane taking off... Cash out before it flies away!');
     setMessageType('info');
 
-    stopGameInterval();
+    stopGameInterval(); // Clear any existing interval before starting a new one
 
+    // Interval for updating currentMultiplier and multiplierHistory for graph animation
     intervalRef.current = setInterval(() => {
+      // Check gamePhase inside interval, using a ref if necessary, or rely on useEffect cleanup
+      // For simplicity, we'll rely on stopGameInterval being called when phase changes.
       setCurrentMultiplier(prev => {
-        const newValue = parseFloat((prev + 0.01 + (prev * 0.005)).toFixed(2)); // Slightly accelerating
-        if (startTime) {
-          const elapsedTime = (Date.now() - startTime) / 1000; 
-          setMultiplierHistory(prevHistory => [...prevHistory, { time: elapsedTime, value: newValue }]);
-        }
+        // Ensure prev is a number; if not, default to 1.0 (shouldn't happen with proper init)
+        const prevMultiplier = typeof prev === 'number' ? prev : 1.0;
+        const newValue = parseFloat((prevMultiplier + 0.01 + (prevMultiplier * 0.005 * (Math.random() * 0.2 + 0.9) )).toFixed(2)); 
+        
+        setStartTime(st => { // Use functional update for startTime if it could be null
+          if (st) {
+            const elapsedTime = (Date.now() - st) / 1000; 
+            setMultiplierHistory(prevHistory => [...prevHistory, { time: elapsedTime, value: newValue }]);
+          }
+          return st;
+        });
         return newValue;
       });
     }, 100); 
@@ -124,50 +136,100 @@ const PlaneGameClient = () => {
   const handleCashOut = useCallback(() => {
     if (gamePhase !== 'running') return;
     stopGameInterval();
+    
+    const finalCashOutMultiplier = currentMultiplier; // Capture the exact multiplier at cash-out
+
     setGamePhase('cashed_out');
+    // setCurrentMultiplier is set here to ensure GsapAnimatedNumber and ReferenceLine use the final value.
+    setCurrentMultiplier(finalCashOutMultiplier); 
+
     const numericBetAmount = parseFloat(betAmount);
-    const winnings = numericBetAmount * currentMultiplier;
+    const winnings = numericBetAmount * finalCashOutMultiplier;
     updateBalance(winnings);
-    setMessage(`Cashed out at ${currentMultiplier.toFixed(2)}x! You won ${winnings.toFixed(2)} units.`);
+    setMessage(`Cashed out at ${finalCashOutMultiplier.toFixed(2)}x! You won ${winnings.toFixed(2)} units.`);
     setMessageType('success');
     toast({
       title: "Cashed Out!",
-      description: `You won ${winnings.toFixed(2)} units at ${currentMultiplier.toFixed(2)}x.`,
+      description: `You won ${winnings.toFixed(2)} units at ${finalCashOutMultiplier.toFixed(2)}x.`,
       className: "bg-primary text-primary-foreground",
     });
-  }, [gamePhase, betAmount, currentMultiplier, updateBalance, stopGameInterval, toast]);
+
+    // Explicitly update multiplierHistory to ensure the graph line reaches the cash-out point
+    if (startTime) { // startTime should be valid if game was running
+      const elapsedTime = (Date.now() - startTime) / 1000;
+      setMultiplierHistory(prevHistory => {
+        const newHistory = [...prevHistory];
+        const lastPoint = newHistory.length > 0 ? newHistory[newHistory.length - 1] : null;
+        // Ensure time is advancing if we add a new point
+        const pointTime = lastPoint ? Math.max(elapsedTime, lastPoint.time + 0.001) : elapsedTime;
+
+        if (!lastPoint) { // History was somehow empty
+          newHistory.push({ time: 0, value: 1.0 }); // Add base point
+          if (finalCashOutMultiplier > 1.0) { // Add cash-out point if it's not 1.0
+            newHistory.push({ time: pointTime, value: finalCashOutMultiplier });
+          }
+        } else if (lastPoint.value < finalCashOutMultiplier) { // If last recorded point is less, add the final point
+          newHistory.push({ time: pointTime, value: finalCashOutMultiplier });
+        }
+        // If lastPoint.value is already >= finalCashOutMultiplier, the interval likely got it or went slightly past.
+        // The graph will draw based on the points in newHistory.
+        return newHistory;
+      });
+    }
+  }, [gamePhase, betAmount, currentMultiplier, updateBalance, stopGameInterval, toast, startTime]);
 
 
   useEffect(() => {
     if (gamePhase === 'running') {
+      // This useEffect now primarily handles game logic decisions (crash or auto-cashout)
+      // The visual animation of the multiplier is handled by the setInterval in startGame
+
       if (currentMultiplier >= crashPoint) {
-        stopGameInterval();
+        stopGameInterval(); // Stop the visual updates
+        
+        const finalCrashedMultiplier = crashPoint; // Use the deterministic crashPoint
+
         setGamePhase('crashed');
-        // Ensure the crash point is the last point in history if it wasn't naturally reached
-        if (startTime) {
+        // Set currentMultiplier to the crash point for GsapAnimatedNumber and other displays
+        setCurrentMultiplier(finalCrashedMultiplier); 
+
+        // Ensure the crash point is the last point in history
+        if (startTime) { // startTime should be valid
             const elapsedTime = (Date.now() - startTime) / 1000;
             setMultiplierHistory(prevHistory => {
-                if (prevHistory.length > 0 && prevHistory[prevHistory.length -1].value < crashPoint) {
-                   return [...prevHistory, { time: elapsedTime, value: crashPoint }];
+                const newHistory = [...prevHistory];
+                const lastPoint = newHistory.length > 0 ? newHistory[newHistory.length - 1] : null;
+                const pointTime = lastPoint ? Math.max(elapsedTime, lastPoint.time + 0.001) : elapsedTime;
+
+                if (!lastPoint) {
+                  newHistory.push({ time: 0, value: 1.0 });
+                  if (finalCrashedMultiplier > 1.0) { 
+                    newHistory.push({ time: pointTime, value: finalCrashedMultiplier });
+                  }
+                } else if (lastPoint.value < finalCrashedMultiplier) {
+                  newHistory.push({ time: pointTime, value: finalCrashedMultiplier });
                 }
-                return prevHistory;
+                return newHistory;
             });
         }
-        setCurrentMultiplier(crashPoint); // Set final multiplier to crash point
-        setMessage(`Oh no! Plane flew away at ${crashPoint.toFixed(2)}x.`);
+        
+        setMessage(`Oh no! Plane flew away at ${finalCrashedMultiplier.toFixed(2)}x.`);
         setMessageType('error');
         toast({
           title: "Plane Flew Away!",
-          description: `Crashed at ${crashPoint.toFixed(2)}x. Better luck next time.`,
+          description: `Crashed at ${finalCrashedMultiplier.toFixed(2)}x. Better luck next time.`,
           variant: "destructive",
         });
       } else {
+        // Check for auto cash-out
         const numericTargetMultiplier = parseFloat(targetMultiplier);
-        if (!isNaN(numericTargetMultiplier) && currentMultiplier >= numericTargetMultiplier) {
-          handleCashOut();
+        if (targetMultiplier !== "" && !isNaN(numericTargetMultiplier) && numericTargetMultiplier >= MIN_MULTIPLIER_TARGET && currentMultiplier >= numericTargetMultiplier) {
+          handleCashOut(); // This will stop interval, set phase, and update history
         }
       }
     }
+  // Dependencies: currentMultiplier changes rapidly. gamePhase, crashPoint, targetMultiplier, startTime change less often.
+  // handleCashOut and stopGameInterval are memoized.
   }, [currentMultiplier, crashPoint, gamePhase, targetMultiplier, handleCashOut, stopGameInterval, toast, startTime]);
 
 
@@ -177,6 +239,9 @@ const PlaneGameClient = () => {
     setCurrentMultiplier(1.00);
     setMultiplierHistory([{ time: 0, value: 1.0 }]);
     setStartTime(null);
+    // Bet amount and target multiplier can retain their values or be reset
+    // setBetAmount('10');
+    // setTargetMultiplier('2.0');
     setMessage('Place your bet to start the game!');
     setMessageType('info');
   };
@@ -228,7 +293,7 @@ const PlaneGameClient = () => {
                   tickFormatter={(tick) => `${tick.toFixed(1)}x`}
                   stroke="hsl(var(--muted-foreground))"
                   fontSize={10}
-                  mirror={gamePhase === 'crashed'}
+                  mirror={gamePhase === 'crashed'} // Optional: flip Y axis on crash
                 />
                 <Tooltip
                   contentStyle={{
@@ -248,21 +313,26 @@ const PlaneGameClient = () => {
                   stroke={gamePhase === 'crashed' ? "hsl(var(--destructive))" : "hsl(var(--primary))"}
                   strokeWidth={3} 
                   dot={false} 
-                  isAnimationActive={true} 
-                  animationDuration={90} 
+                  isAnimationActive={true} // Animates when `data` (multiplierHistory) changes
+                  animationDuration={90} // Duration of animation between data points
                   animationEasing="linear" 
                 />
+                {/* Reference line for crash point */}
                 {gamePhase === 'crashed' && crashPoint > 0 && (
                   <ReferenceLine y={crashPoint} stroke="hsl(var(--destructive))" strokeDasharray="4 4" ifOverflow="extendDomain">
                     <RechartsLabelComponent value={`Crashed @ ${crashPoint.toFixed(2)}x`} position="top" fill="hsl(var(--destructive))" fontSize={10} dy={-5} />
                   </ReferenceLine>
                 )}
+                 {/* Reference line for actual cash-out point */}
                  {gamePhase === 'cashed_out' && (
                     <ReferenceLine y={currentMultiplier} stroke="hsl(var(--primary))" strokeDasharray="4 4" ifOverflow="extendDomain">
                         <RechartsLabelComponent value={`Cashed @ ${currentMultiplier.toFixed(2)}x`} position="top" fill="hsl(var(--primary))" fontSize={10} dy={-5} />
                     </ReferenceLine>
                 )}
-                {(gamePhase === 'running' || gamePhase === 'betting' || gamePhase === 'idle') && parseFloat(targetMultiplier) >= MIN_MULTIPLIER_TARGET && (
+                {/* Reference line for target multiplier if set and game is not over */}
+                {(gamePhase === 'running' || gamePhase === 'betting' || gamePhase === 'idle') && 
+                  targetMultiplier !== "" && parseFloat(targetMultiplier) >= MIN_MULTIPLIER_TARGET && 
+                  !isNaN(parseFloat(targetMultiplier)) && (
                    <ReferenceLine y={parseFloat(targetMultiplier)} stroke="hsl(var(--secondary))" strokeDasharray="3 3" ifOverflow="extendDomain">
                      <RechartsLabelComponent value={`Target @ ${parseFloat(targetMultiplier).toFixed(2)}x`} position="top" fill="hsl(var(--secondary))" fontSize={10} dy={-5} />
                    </ReferenceLine>
@@ -289,7 +359,7 @@ const PlaneGameClient = () => {
               </div>
             </div>
             <div>
-              <ShadcnLabel htmlFor="target-multiplier-plane" className="font-semibold">Auto Cash Out At (Optional)</ShadcnLabel>
+              <ShadcnLabel htmlFor="target-multiplier-plane" className="font-semibold">Auto Cash Out (e.g. 2.0x)</ShadcnLabel>
                <div className="relative mt-1">
                  <Target className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-muted-foreground" />
                 <Input
@@ -297,7 +367,7 @@ const PlaneGameClient = () => {
                   type="text"
                   value={targetMultiplier}
                   onChange={handleTargetMultiplierChange}
-                  placeholder={`${MIN_MULTIPLIER_TARGET}x - ${MAX_MULTIPLIER_TARGET}x`}
+                  placeholder={`${MIN_MULTIPLIER_TARGET}x - ${MAX_MULTIPLIER_TARGET}x (optional)`}
                   className="pl-10 h-11 text-md"
                   disabled={gamePhase === 'running'}
                 />
@@ -331,4 +401,3 @@ const PlaneGameClient = () => {
 };
 
 export default PlaneGameClient;
-
