@@ -11,7 +11,7 @@ import { DollarSign, Target, Rocket, CheckCircle2 } from 'lucide-react';
 import GsapAnimatedNumber from '../animations/GsapAnimatedNumber';
 import { useToast } from '@/hooks/use-toast';
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, ReferenceLine, Label as RechartsLabelComponent } from 'recharts'; // Imported Label as RechartsLabelComponent
-import type { GameActionValidationParams, GameActionValidationResult } from '@/lib/validation';
+import type { GameActionValidationParams, ValidationResult } from '@/lib/validation';
 import { validateGameAction } from '@/lib/validation';
 
 type GamePhase = 'idle' | 'betting' | 'crashed' | 'cashed_out' | 'running';
@@ -72,7 +72,7 @@ const PlaneGameClient = () => {
     }
   };
 
-  const startGame = () => {
+  const startGame = async () => {
     const numericBetAmount = parseFloat(betAmount);
     const numericTargetMultiplierValue = targetMultiplier.trim() === "" ? undefined : parseFloat(targetMultiplier);
 
@@ -88,7 +88,7 @@ const PlaneGameClient = () => {
         maxTargetMultiplier: MAX_MULTIPLIER_TARGET,
     };
 
-    const validationResult: GameActionValidationResult = validateGameAction(validationParams);
+    const validationResult: ValidationResult = validateGameAction(validationParams);
     if (!validationResult.isValid && validationResult.error) {
         setMessage(validationResult.error.description);
         setMessageType('error');
@@ -96,15 +96,11 @@ const PlaneGameClient = () => {
         return;
     }
     
-    // Use placeGameBet from context
-    const betPlaced = placeGameBet('plane', numericBetAmount, { targetMultiplier: numericTargetMultiplierValue });
+    const betPlaced = await placeGameBet('plane', numericBetAmount, { targetMultiplier: numericTargetMultiplierValue });
     if (!betPlaced) {
-      // Toast for insufficient balance or other general bet placement errors already handled by placeGameBet
       return;
     }
 
-
-    // updateBalance(-numericBetAmount); // Balance deduction is now handled by placeGameBet
     setGamePhase('running');
     setCurrentMultiplier(1.00);
     setMultiplierHistory([{ time: 0, value: 1.0 }]); 
@@ -127,8 +123,7 @@ const PlaneGameClient = () => {
       setCurrentMultiplier(prev => {
         const prevMultiplier = typeof prev === 'number' ? prev : 1.0;
         const elapsedTimeSinceStart = startTime ? (Date.now() - startTime) / 1000 : 0;
-        // Slower initial rise, then accelerates slightly
-        const growthFactor = 0.003 + Math.min(elapsedTimeSinceStart / 1000, 0.007); // Max growth factor contribution
+        const growthFactor = 0.003 + Math.min(elapsedTimeSinceStart / 1000, 0.007); 
         const newValue = parseFloat((prevMultiplier + 0.01 + (prevMultiplier * growthFactor * (Math.random() * 0.2 + 0.9) )).toFixed(2)); 
         
         setStartTime(st => { 
@@ -136,8 +131,6 @@ const PlaneGameClient = () => {
             const elapsedTime = (Date.now() - st) / 1000; 
              setMultiplierHistory(prevHistory => {
               const newPoint = { time: parseFloat(elapsedTime.toFixed(1)), value: newValue };
-              // Keep a limited history for performance if needed, e.g., last 100 points
-              // For now, keep all for smoother animation
               return [...prevHistory, newPoint];
             });
           }
@@ -149,7 +142,7 @@ const PlaneGameClient = () => {
   };
 
   const handleCashOut = useCallback(() => {
-    if (gamePhase !== ('running' as GamePhase)) return;
+    if (gamePhase !== 'running') return;
     stopGameInterval();
     
     const finalCashOutMultiplier = currentMultiplier; 
@@ -159,7 +152,7 @@ const PlaneGameClient = () => {
 
     const numericBetAmount = parseFloat(betAmount);
     const winnings = numericBetAmount * finalCashOutMultiplier;
-    updateBalance(winnings); // Add winnings back, initial stake was already deducted by placeGameBet
+    updateBalance(winnings); 
     setMessage(`Cashed out at ${finalCashOutMultiplier.toFixed(2)}x! You won ${winnings.toFixed(2)} units.`);
     setMessageType('success');
     toast({
@@ -173,7 +166,6 @@ const PlaneGameClient = () => {
       setMultiplierHistory(prevHistory => {
         const newHistory = [...prevHistory];
         const lastPoint = newHistory.length > 0 ? newHistory[newHistory.length - 1] : null;
-        // Ensure time always increases for the cash out point visualization
         const pointTime = lastPoint ? Math.max(parseFloat(elapsedTime.toFixed(1)), parseFloat((lastPoint.time + 0.01).toFixed(1))) : parseFloat(elapsedTime.toFixed(1));
 
         if (!lastPoint) { 
@@ -182,10 +174,8 @@ const PlaneGameClient = () => {
             newHistory.push({ time: pointTime, value: finalCashOutMultiplier });
           }
         } else if (lastPoint.value < finalCashOutMultiplier || newHistory.length === 1) { 
-          // Add point if multiplier increased or it's the first segment
            newHistory.push({ time: pointTime, value: finalCashOutMultiplier });
         } else {
-            // If current multiplier is not higher (e.g. quick cashout), ensure the last point reflects the cashout multiplier
             newHistory[newHistory.length-1] = {...newHistory[newHistory.length-1], value: finalCashOutMultiplier, time: pointTime};
         }
         return newHistory;
@@ -195,7 +185,7 @@ const PlaneGameClient = () => {
 
 
   useEffect(() => {
-    if (gamePhase === ('running' as GamePhase)) {
+    if (gamePhase === 'running') {
       if (currentMultiplier >= crashPoint) {
         stopGameInterval(); 
         
@@ -248,6 +238,8 @@ const PlaneGameClient = () => {
     setCurrentMultiplier(1.00);
     setMultiplierHistory([{ time: 0, value: 1.0 }]);
     setStartTime(null);
+    // setBetAmount('10'); // Optionally reset bet amount
+    // setTargetMultiplier('2.0'); // Optionally reset target multiplier
     setMessage('Place your bet to start the game!');
     setMessageType('info');
   };
@@ -258,11 +250,14 @@ const PlaneGameClient = () => {
     return 'text-muted-foreground';
   };
 
+  const isInputDisabled = gamePhase === 'running' || gamePhase === 'crashed' || gamePhase === 'cashed_out';
+
+
   return (
     <Card className="w-full shadow-xl">
       <CardHeader>
         <div className="flex items-center justify-center gap-2 text-primary mb-2">
-            <Rocket size={32} className={gamePhase === ('running' as GamePhase) ? 'animate-pulse': ''} />
+            <Rocket size={32} className={gamePhase === 'running' ? 'animate-pulse': ''} />
             <CardTitle className="text-3xl font-bold">Plane Game</CardTitle>
         </div>
         <CardDescription className="text-center">
@@ -309,7 +304,7 @@ const PlaneGameClient = () => {
                     borderColor: 'hsl(var(--border))',
                     borderRadius: 'var(--radius)',
                     color: 'hsl(var(--popover-foreground))',
-                    boxShadow: '0 4px 12px hsla(var(--shadow-color), 0.1)', /* Example shadow */
+                    boxShadow: '0 4px 12px hsla(var(--shadow-color), 0.1)', 
                   }}
                   itemStyle={{ color: 'hsl(var(--primary))', fontWeight: 'bold' }}
                   formatter={(value: number) => [`${value.toFixed(2)}x`, "Multiplier"]}
@@ -337,7 +332,7 @@ const PlaneGameClient = () => {
                         <RechartsLabelComponent value={`Cashed @ ${currentMultiplier.toFixed(2)}x`} position="insideTopRight" fill="hsl(var(--primary))" fontSize={11} dy={-5} dx={-5} />
                     </ReferenceLine>
                 )}
-                {(gamePhase === ('running' as GamePhase) || gamePhase === 'betting' || gamePhase === 'idle') && 
+                {(gamePhase === 'running' || gamePhase === 'betting' || gamePhase === 'idle') && 
                   targetMultiplier.trim() !== "" && parseFloat(targetMultiplier) >= MIN_MULTIPLIER_TARGET && 
                   !isNaN(parseFloat(targetMultiplier)) && (
                    <ReferenceLine y={parseFloat(targetMultiplier)} stroke="hsl(var(--secondary))" strokeDasharray="3 3" ifOverflow="extendDomain">
@@ -349,7 +344,7 @@ const PlaneGameClient = () => {
           </div>
         </div>
 
-        { (gamePhase === 'idle' || gamePhase === 'betting' || gamePhase === 'crashed' || gamePhase === 'cashed_out') && (
+        { (gamePhase === 'idle' || gamePhase === 'betting') && (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-end">
             <div>
               <ShadcnLabel htmlFor="bet-amount-plane" className="font-semibold">Bet Amount ({MIN_BET}-{MAX_BET})</ShadcnLabel>
@@ -361,7 +356,7 @@ const PlaneGameClient = () => {
                   value={betAmount}
                   onChange={handleBetAmountChange}
                   className="pl-10 h-11 text-md"
-                  disabled={gamePhase === 'crashed' || gamePhase === 'cashed_out'}
+                  disabled={isInputDisabled}
                 />
               </div>
             </div>
@@ -376,7 +371,7 @@ const PlaneGameClient = () => {
                   onChange={handleTargetMultiplierChange}
                   placeholder={`${MIN_MULTIPLIER_TARGET}x - ${MAX_MULTIPLIER_TARGET}x (optional)`}
                   className="pl-10 h-11 text-md"
-                  disabled={gamePhase === 'crashed' || gamePhase === 'cashed_out'}
+                  disabled={isInputDisabled}
                 />
               </div>
             </div>
@@ -389,7 +384,7 @@ const PlaneGameClient = () => {
             <Rocket className="mr-2 h-5 w-5" /> Place Bet & Start
           </Button>
         )}
-        { gamePhase === ('running' as GamePhase) && (
+        { gamePhase === 'running' && (
           <Button onClick={handleCashOut} className="w-full bg-green-500 hover:bg-green-600 text-white text-lg py-3">
             <CheckCircle2 className="mr-2 h-5 w-5" /> Cash Out @ {currentMultiplier.toFixed(2)}x
           </Button>
@@ -399,7 +394,7 @@ const PlaneGameClient = () => {
             Play Again
           </Button>
         )}
-         {gamePhase !== 'idle' && gamePhase !== 'betting' && gamePhase !== ('running' as GamePhase) && (
+         {gamePhase !== 'idle' && gamePhase !== 'betting' && gamePhase !== 'running' && (
             <p className="text-xs text-muted-foreground">Game Over. Click "Play Again" to restart.</p>
          )}
       </CardFooter>

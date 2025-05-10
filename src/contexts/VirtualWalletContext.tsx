@@ -1,17 +1,16 @@
 // src/contexts/VirtualWalletContext.tsx
 "use client";
 
-import type { PlacedBet, GameType as LibGameType } from '@/types';
+import type { PlacedBet, GameType as AppGameType } from '@/types';
 import React, { createContext, useContext, useState, useEffect, useCallback, useMemo } from 'react';
 import { INITIAL_VIRTUAL_BALANCE } from '@/lib/constants';
 import { useToast } from '@/hooks/use-toast';
 import { v4 as uuidv4 } from 'uuid';
-import { validateBetPlacement, validateGameAction } from '@/lib/validation'; // Assuming this path is correct now
+import { validateBetPlacement, validateGameAction } from '@/lib/validation';
 import type { ValidationResult, GameActionValidationParams } from '@/lib/validation';
 import { useAuth } from './AuthContext';
 import { db } from '@/lib/firebase';
 import { doc, getDoc, setDoc, writeBatch, collection, query, where, getDocs, updateDoc, increment } from 'firebase/firestore';
-import type { User } from 'firebase/auth';
 
 
 const MATCH_RESOLUTION_DELAY_MS = 2 * 60 * 60 * 1000; // 2 hours for mock match duration
@@ -22,9 +21,9 @@ export interface VirtualWalletContextType {
   bets: PlacedBet[];
   addFunds: (amount: number) => Promise<void>;
   placeBet: (matchId: string, matchDescription: string, selectedOutcome: string, stake: number, odds: number, matchTime: Date) => Promise<boolean>;
-  placeGameBet: (gameType: LibGameType, stake: number, gameSpecificParams?: Record<string, any>) => Promise<boolean>;
+  placeGameBet: (gameType: AppGameType, stake: number, gameSpecificParams?: Record<string, any>) => Promise<boolean>;
   withdrawBet: (betId: string) => Promise<void>;
-  updateBalance: (amount: number, description?: string) => void; // This is more for direct local updates, use with caution
+  updateBalance: (amount: number, description?: string) => void;
   isLoading: boolean;
   fetchUserWalletData: (userId: string) => Promise<void>;
 }
@@ -63,7 +62,7 @@ export const VirtualWalletProvider: React.FC<{ children: React.ReactNode }> = ({
     } catch (error) {
       console.error("Error fetching user wallet data:", error);
       toast({ title: "Error", description: "Could not load wallet information.", variant: "destructive" });
-      setBalance(INITIAL_VIRTUAL_BALANCE); // Reset to default on error
+      setBalance(INITIAL_VIRTUAL_BALANCE); 
       setBets([]);
     } finally {
       setWalletLoading(false);
@@ -72,14 +71,13 @@ export const VirtualWalletProvider: React.FC<{ children: React.ReactNode }> = ({
 
   useEffect(() => {
     if (authLoading) {
-      setWalletLoading(true); // Ensure wallet loading state reflects auth loading
-      return; // Return early if auth is still loading
+      setWalletLoading(true); 
+      return; 
     }
     if (currentUser) {
       fetchUserWalletData(currentUser.uid);
     } else {
-      // Handle guest user or logged-out state
-      setBalance(INITIAL_VIRTUAL_BALANCE); // Or load from guest local storage
+      setBalance(INITIAL_VIRTUAL_BALANCE); 
       setBets([]);
       setWalletLoading(false);
     }
@@ -108,18 +106,14 @@ export const VirtualWalletProvider: React.FC<{ children: React.ReactNode }> = ({
   }, [currentUser, toast]);
 
   const updateBalance = useCallback((amount: number, description?: string) => {
-    // This is a local-only update, primarily for game logic that doesn't persist bets but affects balance.
-    // For persistent balance changes (like winning a match bet), the update should happen via Firestore triggers or server-side logic.
     setBalance(prevBalance => parseFloat((prevBalance + amount).toFixed(2)));
     if (description) {
        toast({ title: "Balance Updated", description, className: "bg-primary text-primary-foreground" });
     }
-     // If currentUser exists, also update Firestore for non-bet related direct balance updates
-    if (currentUser && amount !== 0) { // Only update if there's a change and a user
+    if (currentUser && amount !== 0) { 
         const userWalletRef = doc(db, "wallets", currentUser.uid);
         updateDoc(userWalletRef, { balance: increment(amount) }).catch(err => {
             console.error("Error directly updating balance in Firestore from local updateBalance:", err);
-            // Potentially revert local change or notify user
         });
     }
   }, [currentUser, toast]);
@@ -130,18 +124,18 @@ export const VirtualWalletProvider: React.FC<{ children: React.ReactNode }> = ({
       return false;
     }
 
-    const validationResult = validateBetPlacement({
+    const validationResult: ValidationResult = validateBetPlacement({
       betType: 'match',
       matchId,
       stake,
       currentBalance: balance,
       existingBets: bets,
-      minBetAmount: undefined, // Use default
-      maxBetAmount: undefined, // Use default
-      isModalOpening: false,
+      minBetAmount: undefined, 
+      maxBetAmount: undefined, 
+      isModalOpening: false, // This is an actual bet placement
     });
 
-    if (validationResult && validationResult.error) {
+    if (!validationResult.isValid && validationResult.error) {
       toast({ title: validationResult.error.title, description: validationResult.error.description, variant: "destructive" });
       return false;
     }
@@ -161,7 +155,7 @@ export const VirtualWalletProvider: React.FC<{ children: React.ReactNode }> = ({
     };
 
     const userWalletRef = doc(db, "wallets", currentUser.uid);
-    const betDocRef = doc(collection(db, "bets")); // Auto-generate ID
+    const betDocRef = doc(collection(db, "bets")); 
 
     try {
       const batch = writeBatch(db);
@@ -180,7 +174,7 @@ export const VirtualWalletProvider: React.FC<{ children: React.ReactNode }> = ({
     }
   }, [currentUser, balance, bets, toast]);
 
-  const placeGameBet = useCallback(async (gameType: LibGameType, stake: number, gameSpecificParams?: Record<string, any>): Promise<boolean> => {
+  const placeGameBet = useCallback(async (gameType: AppGameType, stake: number, gameSpecificParams?: Record<string, any>): Promise<boolean> => {
     if (!currentUser) {
         toast({ title: "Login Required", description: "Please log in to play games.", variant: "destructive" });
         return false;
@@ -191,26 +185,23 @@ export const VirtualWalletProvider: React.FC<{ children: React.ReactNode }> = ({
         actionType: 'place_bet',
         stake,
         currentBalance: balance,
-        minBetAmount: gameSpecificParams?.minBet, // Pass through game specific limits
+        minBetAmount: gameSpecificParams?.minBet, 
         maxBetAmount: gameSpecificParams?.maxBet,
         gameSpecificParams,
+        minTargetMultiplier: gameSpecificParams?.minTargetMultiplier,
+        maxTargetMultiplier: gameSpecificParams?.maxTargetMultiplier,
     };
-    const validationResult = validateGameAction(validationParams);
+    const validationResult: ValidationResult = validateGameAction(validationParams);
 
-    if (validationResult && validationResult.error) {
+    if (!validationResult.isValid && validationResult.error) {
         toast({ title: validationResult.error.title, description: validationResult.error.description, variant: "destructive" });
         return false;
     }
 
-    // For game bets, we might not store them as persistently as match bets,
-    // or they might be ephemeral and only affect the balance.
-    // Here, we'll deduct balance and assume the game component handles its state.
     const userWalletRef = doc(db, "wallets", currentUser.uid);
     try {
       await updateDoc(userWalletRef, { balance: increment(-stake) });
       setBalance(prevBalance => parseFloat((prevBalance - stake).toFixed(2)));
-      // Optionally, log game bet for history, but not adding to main 'bets' state for now unless required
-      // This simplifies as game outcomes (win/loss) update balance directly via updateBalance.
       toast({ title: `${gameType.charAt(0).toUpperCase() + gameType.slice(1)} Bet Placed!`, description: `Successfully placed a ${stake} unit bet.`, className: "bg-primary text-primary-foreground", duration: 3000 });
       return true;
     } catch (error) {
@@ -263,10 +254,7 @@ export const VirtualWalletProvider: React.FC<{ children: React.ReactNode }> = ({
       toast({ title: "Error", description: "Failed to withdraw bet.", variant: "destructive" });
     }
   }, [currentUser, bets, toast]);
-
-  // Note: Bet resolution (pending -> won/lost) should ideally be handled by a backend process (e.g., Cloud Function)
-  // to ensure reliability and not depend on the client being open.
-  // The client-side resolution below is a simplification for this project.
+  
   const resolveBetsAndUpdateState = useCallback(async () => {
     if (!currentUser || bets.length === 0) return;
 
@@ -284,7 +272,7 @@ export const VirtualWalletProvider: React.FC<{ children: React.ReactNode }> = ({
     const updatedBetStatuses: { id: string, status: 'won' | 'lost', winnings?: number }[] = [];
 
     for (const bet of pendingBetsToResolve) {
-      const won = Math.random() < 0.4; // Simulate win/loss
+      const won = Math.random() < 0.4; 
       const betDocRef = doc(db, "bets", bet.id);
       if (won) {
         batch.update(betDocRef, { status: 'won' });
@@ -303,7 +291,6 @@ export const VirtualWalletProvider: React.FC<{ children: React.ReactNode }> = ({
 
     try {
       await batch.commit();
-      // Update local state after successful Firestore update
       setBets(prevBets =>
         prevBets.map(pb => {
           const resolved = updatedBetStatuses.find(ub => ub.id === pb.id);
@@ -313,15 +300,21 @@ export const VirtualWalletProvider: React.FC<{ children: React.ReactNode }> = ({
       if (totalWinningsThisCycle > 0) {
         setBalance(prevBalance => parseFloat((prevBalance + totalWinningsThisCycle).toFixed(2)));
       }
-      // Show toasts after local state update
       updatedBetStatuses.forEach(ub => {
         const bet = pendingBetsToResolve.find(pb => pb.id === ub.id);
         if(bet){
-            if(ub.status === 'won'){
-                 setTimeout(() => toast({ title: "Bet Resolved!", description: `You WON ${ub.winnings?.toFixed(2)} on ${bet.matchDescription}!`, className: "bg-primary text-primary-foreground animate-pulse", duration: 7000 }), 0);
-            } else {
-                 setTimeout(() => toast({ title: "Bet Resolved", description: `You lost your bet on ${bet.matchDescription}. Better luck next time!`, variant: "destructive", duration: 7000 }), 0);
-            }
+          const toastOptions: any = { duration: 7000 };
+           if(ub.status === 'won'){
+             toastOptions.title = "Bet Resolved!";
+             toastOptions.description = `You WON ${ub.winnings?.toFixed(2)} on ${bet.matchDescription}!`;
+             toastOptions.className = "bg-primary text-primary-foreground animate-pulse";
+           } else {
+             toastOptions.title = "Bet Resolved";
+             toastOptions.description = `You lost your bet on ${bet.matchDescription}. Better luck next time!`;
+             toastOptions.variant = "destructive";
+           }
+           // Using setTimeout to ensure toasts are shown after state updates and avoid batching issues with toasts
+           setTimeout(() => toast(toastOptions), 0);
         }
       });
 
@@ -335,7 +328,7 @@ export const VirtualWalletProvider: React.FC<{ children: React.ReactNode }> = ({
     if (!currentUser || authLoading || walletLoading) return;
     const intervalId = setInterval(() => {
         resolveBetsAndUpdateState();
-    }, 60000); // Check every minute
+    }, 60000); 
 
     return () => clearInterval(intervalId);
   }, [currentUser, authLoading, walletLoading, resolveBetsAndUpdateState]);
@@ -348,7 +341,7 @@ export const VirtualWalletProvider: React.FC<{ children: React.ReactNode }> = ({
     placeBet,
     placeGameBet,
     withdrawBet,
-    updateBalance, // Exposing this for direct local updates if needed by games
+    updateBalance, 
     isLoading: authLoading || walletLoading,
     fetchUserWalletData,
   }), [balance, bets, addFunds, placeBet, placeGameBet, withdrawBet, updateBalance, authLoading, walletLoading, fetchUserWalletData]);
@@ -363,7 +356,6 @@ export const VirtualWalletProvider: React.FC<{ children: React.ReactNode }> = ({
 export const useVirtualWallet = (): VirtualWalletContextType => {
   const context = useContext(VirtualWalletContext);
   if (context === undefined) {
-    // This error message is more specific now.
     throw new Error('useVirtualWallet() hook is being called outside of a <VirtualWalletProvider>. This usually means a component that needs wallet access is not a descendant of VirtualWalletProvider. Please check your component tree.');
   }
   return context;

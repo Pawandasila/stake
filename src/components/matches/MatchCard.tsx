@@ -11,7 +11,8 @@ import { Clock, Shield, Swords, Trophy, Zap, Users, BarChart } from 'lucide-reac
 import React, { useState, useEffect } from 'react';
 import BetModal from '@/components/betting/BetModal';
 import TeamPerformanceBarChart from '@/components/charts/TeamPerformanceBarChart';
-import { mockTeamPerformance } from '@/lib/mockData';
+import { mockTeamPerformance } from '@/lib/mockData'; // Will be replaced by Firestore data
+import type { ValidationResult } from '@/lib/validation';
 import { validateBetPlacement } from '@/lib/validation';
 import { useVirtualWallet } from '@/contexts/VirtualWalletContext';
 import { useToast } from '@/hooks/use-toast';
@@ -71,7 +72,7 @@ const MatchCard: React.FC<MatchCardProps> = ({ match }) => {
 
 
   const handleBetButtonClick = (name: string, odds: number) => {
-    const validationError = validateBetPlacement({
+    const validationResult: ValidationResult = validateBetPlacement({
       betType: 'match',
       matchId: match.id,
       stake: MIN_BET_AMOUNT, // Use a dummy stake for pre-validation, modal handles actual stake
@@ -79,16 +80,21 @@ const MatchCard: React.FC<MatchCardProps> = ({ match }) => {
       existingBets: bets,
       minBetAmount: MIN_BET_AMOUNT,
       maxBetAmount: MAX_BET_AMOUNT,
-      isModalOpening: true, // Signal that this is for modal opening
+      isModalOpening: true, // Indicate this is a pre-check for modal opening
     });
   
-    if (validationError && validationError.code === 'ALREADY_BET_ON_MATCH') {
-      toast({
-        title: validationError.title,
-        description: validationError.description,
-        variant: "destructive",
-      });
-      return; 
+    if (!validationResult.isValid && validationResult.error) {
+      // Only show toast and prevent modal for ALREADY_BET_ON_MATCH when opening modal.
+      // Other errors (like insufficient balance for MIN_BET) are better handled in BetModal itself
+      // or when the user tries to confirm the bet with an actual stake.
+      if (validationResult.error.code === 'ALREADY_BET_ON_MATCH') {
+        toast({
+          title: validationResult.error.title,
+          description: validationResult.error.description,
+          variant: "destructive",
+        });
+        return; 
+      }
     }
 
     setSelectedOutcome({ name, odds });
@@ -165,7 +171,7 @@ const MatchCard: React.FC<MatchCardProps> = ({ match }) => {
         {match.odds.draw > 0 && (
           <Button 
             variant="outline" 
-            className="w-full text-xs md:text-sm py-2 h-auto border-muted-foreground/50 hover:bg-secondary/50"
+            className="w-full text-xs md:text-sm py-2 h-auto border-muted-foreground/50 hover:bg-secondary/50 text-secondary-foreground"
             onClick={() => handleBetButtonClick('Draw', match.odds.draw)}
           >
             Draw <span className="font-bold ml-1">@{match.odds.draw.toFixed(2)}</span>
