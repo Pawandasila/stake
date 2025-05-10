@@ -1,13 +1,13 @@
 // src/components/ai/AIRecommendationClient.tsx
 "use client";
 
-import { useFormState, useFormStatus } from "react-dom";
+import { useFormStatus } from "react-dom";
+import { useActionState, useEffect, useRef } from "react";
 import { getAIRecommendationAction, type RecommendationActionState } from "@/actions/recommendationActions";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { useEffect, useRef } from "react";
 import { useToast } from "@/hooks/use-toast";
 import { DEFAULT_AI_USER_HISTORY, DEFAULT_AI_TEAM_PERFORMANCE } from "@/lib/constants";
 import { Lightbulb, Loader2, AlertTriangle } from "lucide-react";
@@ -24,7 +24,7 @@ function SubmitButton() {
 
 const AIRecommendationClient = () => {
   const initialState: RecommendationActionState = {};
-  const [state, formAction] = useFormState(getAIRecommendationAction, initialState);
+  const [state, formAction] = useActionState(getAIRecommendationAction, initialState);
   const { toast } = useToast();
   const formRef = useRef<HTMLFormElement>(null);
 
