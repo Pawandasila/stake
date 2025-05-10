@@ -12,6 +12,11 @@ import React, { useState, useEffect } from 'react';
 import BetModal from '@/components/betting/BetModal';
 import TeamPerformanceBarChart from '@/components/charts/TeamPerformanceBarChart';
 import { mockTeamPerformance } from '@/lib/mockData';
+import { validateBetPlacement } from '@/lib/validation';
+import { useVirtualWallet } from '@/contexts/VirtualWalletContext';
+import { useToast } from '@/hooks/use-toast';
+import { MIN_BET_AMOUNT, MAX_BET_AMOUNT } from '@/lib/constants';
+
 
 interface MatchCardProps {
   match: Match;
@@ -38,6 +43,9 @@ const MatchCard: React.FC<MatchCardProps> = ({ match }) => {
   const [showChart, setShowChart] = useState(false);
   const [timeToMatch, setTimeToMatch] = useState('');
   const [bettorsCount, setBettorsCount] = useState<number | null>(null);
+  const { balance, bets } = useVirtualWallet();
+  const { toast } = useToast();
+
 
   useEffect(() => {
     const calculateTime = () => {
@@ -63,6 +71,26 @@ const MatchCard: React.FC<MatchCardProps> = ({ match }) => {
 
 
   const handleBetButtonClick = (name: string, odds: number) => {
+    const validationError = validateBetPlacement({
+      betType: 'match',
+      matchId: match.id,
+      stake: MIN_BET_AMOUNT, // Use a dummy stake for pre-validation, modal handles actual stake
+      currentBalance: balance,
+      existingBets: bets,
+      minBetAmount: MIN_BET_AMOUNT,
+      maxBetAmount: MAX_BET_AMOUNT,
+      isModalOpening: true, // Signal that this is for modal opening
+    });
+  
+    if (validationError && validationError.code === 'ALREADY_BET_ON_MATCH') {
+      toast({
+        title: validationError.title,
+        description: validationError.description,
+        variant: "destructive",
+      });
+      return; 
+    }
+
     setSelectedOutcome({ name, odds });
     setIsBetModalOpen(true);
   };
@@ -108,17 +136,17 @@ const MatchCard: React.FC<MatchCardProps> = ({ match }) => {
       
       <CardContent className="p-4 flex-grow">
         {showChart && (teamAPerformance || teamBPerformance) && (
-          <div className="mt-4 space-y-3">
+          <div className="mt-4 space-y-4">
             {teamAPerformance && (
               <div>
-                <h4 className="text-sm font-semibold mb-1">{match.teamA.name} Recent Performance</h4>
-                <TeamPerformanceBarChart data={teamAPerformance.data} barColor="var(--chart-1)" height="100px" />
+                <h4 className="text-sm font-semibold mb-1.5 text-center text-foreground">{match.teamA.name} Recent Performance</h4>
+                <TeamPerformanceBarChart data={teamAPerformance.data} barColor="hsl(var(--chart-1))" height="120px" />
               </div>
             )}
             {teamBPerformance && (
                <div>
-                <h4 className="text-sm font-semibold mb-1">{match.teamB.name} Recent Performance</h4>
-                <TeamPerformanceBarChart data={teamBPerformance.data} barColor="var(--chart-2)" height="100px" />
+                <h4 className="text-sm font-semibold mb-1.5 text-center text-foreground">{match.teamB.name} Recent Performance</h4>
+                <TeamPerformanceBarChart data={teamBPerformance.data} barColor="hsl(var(--chart-2))" height="120px" />
               </div>
             )}
           </div>

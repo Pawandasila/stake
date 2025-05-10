@@ -11,6 +11,8 @@ import { DollarSign, Target, Rocket, CheckCircle2 } from 'lucide-react';
 import GsapAnimatedNumber from '../animations/GsapAnimatedNumber';
 import { useToast } from '@/hooks/use-toast';
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, ReferenceLine, Label as RechartsLabelComponent } from 'recharts'; // Imported Label as RechartsLabelComponent
+import type { GameActionValidationParams } from '@/lib/validation';
+import { validateGameAction } from '@/lib/validation';
 
 type GamePhase = 'idle' | 'betting' | 'running' | 'crashed' | 'cashed_out';
 type MultiplierDataPoint = { time: number; value: number };
@@ -21,7 +23,7 @@ const MIN_MULTIPLIER_TARGET = 1.01;
 const MAX_MULTIPLIER_TARGET = 100;
 
 const PlaneGameClient = () => {
-  const { balance, updateBalance } = useVirtualWallet();
+  const { balance, updateBalance, placeGameBet } = useVirtualWallet(); // Updated to use placeGameBet
   const { toast } = useToast();
 
   const [betAmount, setBetAmount] = useState<string>('10');
@@ -72,32 +74,37 @@ const PlaneGameClient = () => {
 
   const startGame = () => {
     const numericBetAmount = parseFloat(betAmount);
+    const numericTargetMultiplierValue = targetMultiplier.trim() === "" ? undefined : parseFloat(targetMultiplier);
 
-    if (isNaN(numericBetAmount) || numericBetAmount < MIN_BET || numericBetAmount > MAX_BET) {
-      setMessage(`Bet amount must be between ${MIN_BET} and ${MAX_BET}.`);
-      setMessageType('error');
-      toast({ title: "Invalid Bet Amount", description: `Bet amount must be between ${MIN_BET} and ${MAX_BET}.`, variant: "destructive"});
+    const validationParams: GameActionValidationParams = {
+        gameType: 'plane',
+        actionType: 'place_bet',
+        stake: numericBetAmount,
+        currentBalance: balance,
+        minBetAmount: MIN_BET,
+        maxBetAmount: MAX_BET,
+        targetMultiplier: numericTargetMultiplierValue, // Pass targetMultiplier for validation
+        minTargetMultiplier: MIN_MULTIPLIER_TARGET,
+        maxTargetMultiplier: MAX_MULTIPLIER_TARGET,
+    };
+
+    const validationError = validateGameAction(validationParams);
+    if (validationError) {
+        setMessage(validationError.description);
+        setMessageType('error');
+        toast({ title: validationError.title, description: validationError.description, variant: "destructive" });
+        return;
+    }
+    
+    // Use placeGameBet from context
+    const betPlaced = placeGameBet('plane', numericBetAmount, { targetMultiplier: numericTargetMultiplierValue });
+    if (!betPlaced) {
+      // Toast for insufficient balance or other general bet placement errors already handled by placeGameBet
       return;
     }
-    if (numericBetAmount > balance) {
-      setMessage('Insufficient balance for this bet.');
-      setMessageType('error');
-      toast({ title: "Insufficient Balance", description: "Your balance is too low for this bet.", variant: "destructive"});
-      return;
-    }
-
-    if (targetMultiplier.trim() !== "") { // Only validate if targetMultiplier is not empty or just whitespace
-      const numericTargetMultiplierValue = parseFloat(targetMultiplier);
-      if (isNaN(numericTargetMultiplierValue) || numericTargetMultiplierValue < MIN_MULTIPLIER_TARGET || numericTargetMultiplierValue > MAX_MULTIPLIER_TARGET) {
-           setMessage(`Target multiplier must be between ${MIN_MULTIPLIER_TARGET}x and ${MAX_MULTIPLIER_TARGET}x, or empty.`);
-           setMessageType('error');
-           toast({ title: "Invalid Target Multiplier", description: `Target must be ${MIN_MULTIPLIER_TARGET}x - ${MAX_MULTIPLIER_TARGET}x, or empty if not used.`, variant: "destructive"});
-           return;
-      }
-    }
 
 
-    updateBalance(-numericBetAmount);
+    // updateBalance(-numericBetAmount); // Balance deduction is now handled by placeGameBet
     setGamePhase('running');
     setCurrentMultiplier(1.00);
     setMultiplierHistory([{ time: 0, value: 1.0 }]); 
@@ -119,12 +126,20 @@ const PlaneGameClient = () => {
     intervalRef.current = setInterval(() => {
       setCurrentMultiplier(prev => {
         const prevMultiplier = typeof prev === 'number' ? prev : 1.0;
-        const newValue = parseFloat((prevMultiplier + 0.01 + (prevMultiplier * 0.005 * (Math.random() * 0.2 + 0.9) )).toFixed(2)); 
+        const elapsedTimeSinceStart = startTime ? (Date.now() - startTime) / 1000 : 0;
+        // Slower initial rise, then accelerates slightly
+        const growthFactor = 0.003 + Math.min(elapsedTimeSinceStart / 1000, 0.007); // Max growth factor contribution
+        const newValue = parseFloat((prevMultiplier + 0.01 + (prevMultiplier * growthFactor * (Math.random() * 0.2 + 0.9) )).toFixed(2)); 
         
         setStartTime(st => { 
           if (st) {
             const elapsedTime = (Date.now() - st) / 1000; 
-            setMultiplierHistory(prevHistory => [...prevHistory, { time: elapsedTime, value: newValue }]);
+             setMultiplierHistory(prevHistory => {
+              const newPoint = { time: parseFloat(elapsedTime.toFixed(1)), value: newValue };
+              // Keep a limited history for performance if needed, e.g., last 100 points
+              // For now, keep all for smoother animation
+              return [...prevHistory, newPoint];
+            });
           }
           return st;
         });
@@ -144,7 +159,7 @@ const PlaneGameClient = () => {
 
     const numericBetAmount = parseFloat(betAmount);
     const winnings = numericBetAmount * finalCashOutMultiplier;
-    updateBalance(winnings);
+    updateBalance(winnings); // Add winnings back, initial stake was already deducted by placeGameBet
     setMessage(`Cashed out at ${finalCashOutMultiplier.toFixed(2)}x! You won ${winnings.toFixed(2)} units.`);
     setMessageType('success');
     toast({
@@ -158,15 +173,20 @@ const PlaneGameClient = () => {
       setMultiplierHistory(prevHistory => {
         const newHistory = [...prevHistory];
         const lastPoint = newHistory.length > 0 ? newHistory[newHistory.length - 1] : null;
-        const pointTime = lastPoint ? Math.max(elapsedTime, lastPoint.time + 0.001) : elapsedTime;
+        // Ensure time always increases for the cash out point visualization
+        const pointTime = lastPoint ? Math.max(parseFloat(elapsedTime.toFixed(1)), parseFloat((lastPoint.time + 0.01).toFixed(1))) : parseFloat(elapsedTime.toFixed(1));
 
         if (!lastPoint) { 
           newHistory.push({ time: 0, value: 1.0 }); 
           if (finalCashOutMultiplier > 1.0) { 
             newHistory.push({ time: pointTime, value: finalCashOutMultiplier });
           }
-        } else if (lastPoint.value < finalCashOutMultiplier) { 
-          newHistory.push({ time: pointTime, value: finalCashOutMultiplier });
+        } else if (lastPoint.value < finalCashOutMultiplier || newHistory.length === 1) { 
+          // Add point if multiplier increased or it's the first segment
+           newHistory.push({ time: pointTime, value: finalCashOutMultiplier });
+        } else {
+            // If current multiplier is not higher (e.g. quick cashout), ensure the last point reflects the cashout multiplier
+            newHistory[newHistory.length-1] = {...newHistory[newHistory.length-1], value: finalCashOutMultiplier, time: pointTime};
         }
         return newHistory;
       });
@@ -189,15 +209,17 @@ const PlaneGameClient = () => {
             setMultiplierHistory(prevHistory => {
                 const newHistory = [...prevHistory];
                 const lastPoint = newHistory.length > 0 ? newHistory[newHistory.length - 1] : null;
-                const pointTime = lastPoint ? Math.max(elapsedTime, lastPoint.time + 0.001) : elapsedTime;
+                const pointTime = lastPoint ? Math.max(parseFloat(elapsedTime.toFixed(1)), parseFloat((lastPoint.time + 0.01).toFixed(1))) : parseFloat(elapsedTime.toFixed(1));
 
                 if (!lastPoint) {
                   newHistory.push({ time: 0, value: 1.0 });
                   if (finalCrashedMultiplier > 1.0) { 
                     newHistory.push({ time: pointTime, value: finalCrashedMultiplier });
                   }
-                } else if (lastPoint.value < finalCrashedMultiplier) {
-                  newHistory.push({ time: pointTime, value: finalCrashedMultiplier });
+                } else if (lastPoint.value < finalCrashedMultiplier || newHistory.length === 1) {
+                   newHistory.push({ time: pointTime, value: finalCrashedMultiplier });
+                } else {
+                    newHistory[newHistory.length-1] = {...newHistory[newHistory.length-1], value: finalCrashedMultiplier, time: pointTime};
                 }
                 return newHistory;
             });
@@ -248,26 +270,27 @@ const PlaneGameClient = () => {
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-6">
-        <div className="min-h-[280px] md:min-h-[320px] flex flex-col items-center justify-between bg-card-foreground/5 rounded-lg p-4 border border-border relative overflow-hidden">
+        <div className="min-h-[300px] md:min-h-[350px] flex flex-col items-center justify-between bg-card-foreground/5 rounded-lg p-4 border border-border relative overflow-hidden">
           <div className="text-center z-10 py-2">
             <p className="text-5xl md:text-6xl font-bold text-primary">
-              <GsapAnimatedNumber value={currentMultiplier} precision={2} duration={0.1} />x
+              <GsapAnimatedNumber value={currentMultiplier} precision={2} duration={0.05} />x
             </p>
             <p className={`mt-1 text-xs md:text-sm font-medium ${getMessageColor()}`}>{message}</p>
           </div>
 
-          <div className="w-full h-[150px] md:h-[180px] z-0 mt-2">
+          <div className="w-full h-[180px] md:h-[200px] z-0 mt-2">
             <ResponsiveContainer width="100%" height="100%">
-              <LineChart data={multiplierHistory} margin={{ top: 5, right: 25, left: -15, bottom: 5 }}>
+              <LineChart data={multiplierHistory} margin={{ top: 5, right: 30, left: -10, bottom: 20 }}>
                 <XAxis 
                   dataKey="time" 
                   type="number" 
                   domain={['dataMin', 'dataMax']} 
                   tickFormatter={(tick) => `${tick.toFixed(0)}s`}
                   stroke="hsl(var(--muted-foreground))"
-                  fontSize={10}
+                  fontSize={11}
                   interval="preserveStartEnd"
                   tickCount={5}
+                  label={{ value: "Time (s)", position: 'insideBottom', offset: -10, fontSize: 12, fill: "hsl(var(--muted-foreground))" }}
                 />
                 <YAxis 
                   dataKey="value" 
@@ -276,46 +299,49 @@ const PlaneGameClient = () => {
                   allowDataOverflow 
                   tickFormatter={(tick) => `${tick.toFixed(1)}x`}
                   stroke="hsl(var(--muted-foreground))"
-                  fontSize={10}
+                  fontSize={11}
                   mirror={gamePhase === 'crashed'} 
+                  label={{ value: "Multiplier", angle: -90, position: 'insideLeft', offset: 10, fontSize: 12, fill: "hsl(var(--muted-foreground))" }}
                 />
                 <Tooltip
                   contentStyle={{
                     backgroundColor: 'hsl(var(--popover))',
                     borderColor: 'hsl(var(--border))',
                     borderRadius: 'var(--radius)',
-                    color: 'hsl(var(--popover-foreground))'
+                    color: 'hsl(var(--popover-foreground))',
+                    boxShadow: '0 4px 12px hsla(var(--shadow-color), 0.1)', /* Example shadow */
                   }}
-                  itemStyle={{ color: 'hsl(var(--primary))' }}
+                  itemStyle={{ color: 'hsl(var(--primary))', fontWeight: 'bold' }}
                   formatter={(value: number) => [`${value.toFixed(2)}x`, "Multiplier"]}
                   labelFormatter={(label: number) => `Time: ${label.toFixed(1)}s`}
-                  cursor={{ stroke: 'hsl(var(--primary))', strokeWidth: 1, strokeDasharray: '3 3' }}
+                  cursor={{ stroke: 'hsl(var(--primary))', strokeWidth: 1.5, strokeDasharray: '3 3' }}
+                  animationDuration={50}
                 />
                 <Line 
                   type="monotone" 
                   dataKey="value" 
                   stroke={gamePhase === 'crashed' ? "hsl(var(--destructive))" : "hsl(var(--primary))"}
-                  strokeWidth={3} 
+                  strokeWidth={3.5} 
                   dot={false} 
-                  isAnimationActive={true} 
+                  isAnimationActive={gamePhase === 'running'} 
                   animationDuration={90} 
                   animationEasing="linear" 
                 />
                 {gamePhase === 'crashed' && crashPoint > 0 && (
                   <ReferenceLine y={crashPoint} stroke="hsl(var(--destructive))" strokeDasharray="4 4" ifOverflow="extendDomain">
-                    <RechartsLabelComponent value={`Crashed @ ${crashPoint.toFixed(2)}x`} position="top" fill="hsl(var(--destructive))" fontSize={10} dy={-5} />
+                    <RechartsLabelComponent value={`Crashed @ ${crashPoint.toFixed(2)}x`} position="insideTopRight" fill="hsl(var(--destructive))" fontSize={11} dy={-5} dx={-5} />
                   </ReferenceLine>
                 )}
                  {gamePhase === 'cashed_out' && (
                     <ReferenceLine y={currentMultiplier} stroke="hsl(var(--primary))" strokeDasharray="4 4" ifOverflow="extendDomain">
-                        <RechartsLabelComponent value={`Cashed @ ${currentMultiplier.toFixed(2)}x`} position="top" fill="hsl(var(--primary))" fontSize={10} dy={-5} />
+                        <RechartsLabelComponent value={`Cashed @ ${currentMultiplier.toFixed(2)}x`} position="insideTopRight" fill="hsl(var(--primary))" fontSize={11} dy={-5} dx={-5} />
                     </ReferenceLine>
                 )}
                 {(gamePhase === 'running' || gamePhase === 'betting' || gamePhase === 'idle') && 
                   targetMultiplier.trim() !== "" && parseFloat(targetMultiplier) >= MIN_MULTIPLIER_TARGET && 
                   !isNaN(parseFloat(targetMultiplier)) && (
                    <ReferenceLine y={parseFloat(targetMultiplier)} stroke="hsl(var(--secondary))" strokeDasharray="3 3" ifOverflow="extendDomain">
-                     <RechartsLabelComponent value={`Target @ ${parseFloat(targetMultiplier).toFixed(2)}x`} position="top" fill="hsl(var(--secondary))" fontSize={10} dy={-5} />
+                     <RechartsLabelComponent value={`Target @ ${parseFloat(targetMultiplier).toFixed(2)}x`} position="insideTopRight" fill="hsl(var(--secondary))" fontSize={11} dy={15} dx={-5}/>
                    </ReferenceLine>
                 )}
               </LineChart>
@@ -382,5 +408,3 @@ const PlaneGameClient = () => {
 };
 
 export default PlaneGameClient;
-
-```

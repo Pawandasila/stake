@@ -12,14 +12,6 @@ interface TeamPerformanceBarChartProps {
   title?: string;
 }
 
-const chartConfig = {
-  value: {
-    label: "Performance",
-    color: "hsl(var(--primary))",
-  },
-} satisfies ChartConfig;
-
-
 const TeamPerformanceBarChart: React.FC<TeamPerformanceBarChartProps> = ({ data, barColor, height = "200px", title }) => {
   const dynamicChartConfig = {
     value: {
@@ -33,12 +25,16 @@ const TeamPerformanceBarChart: React.FC<TeamPerformanceBarChartProps> = ({ data,
       {title && <h4 className="text-sm font-semibold mb-2 text-center text-muted-foreground">{title}</h4>}
       <ChartContainer config={dynamicChartConfig} className="w-full h-full">
         <ResponsiveContainer width="100%" height="100%">
-          <RechartsBarChart data={data} margin={{ top: 5, right: 5, left: -20, bottom: 5 }}>
-            <XAxis dataKey="name" tickLine={false} axisLine={false} tickMargin={8} fontSize={10} />
-            <YAxis tickLine={false} axisLine={false} tickMargin={8} fontSize={10} />
+          <RechartsBarChart data={data} margin={{ top: 5, right: 5, left: -15, bottom: 5 }}> {/* Adjusted left margin for YAxis labels */}
+            <XAxis dataKey="name" tickLine={false} axisLine={false} tickMargin={8} fontSize={11} stroke="hsl(var(--muted-foreground))" />
+            <YAxis tickLine={false} axisLine={false} tickMargin={8} fontSize={11} stroke="hsl(var(--muted-foreground))" />
             <Tooltip
               cursor={false}
-              content={<ChartTooltipContent indicator="dot" />}
+              content={<ChartTooltipContent 
+                          indicator="dot" 
+                          labelClassName="font-semibold"
+                          wrapperClassName="bg-popover/90 backdrop-blur-sm shadow-lg" 
+                        />}
             />
             <Bar dataKey="value" fill={barColor || "var(--color-value)"} radius={4} />
           </RechartsBarChart>
