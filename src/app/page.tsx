@@ -5,36 +5,95 @@ import Header from '@/components/layout/Header';
 import Footer from '@/components/layout/Footer';
 import MatchList from '@/components/matches/MatchList';
 import AIRecommendationClient from '@/components/ai/AIRecommendationClient';
-import { mockMatches } from '@/lib/mockData'; // Will be replaced with Firestore data
+// import { mockMatches } from '@/lib/mockData'; // Will be replaced with Firestore data
 import UserBets from '@/components/betting/UserBets';
 import { Separator } from '@/components/ui/separator';
 import { useAuth } from '@/contexts/AuthContext';
 import { Button } from '@/components/ui/button';
 import Link from 'next/link';
-import { ShieldQuestion, Trophy } from 'lucide-react';
+import { ShieldQuestion, Trophy, Loader2 } from 'lucide-react';
 import { useRouter } from 'next/navigation';
-import { useEffect } from 'react';
-import Loading from './loading';
+import React, { useEffect, useState } from 'react';
+import LoadingSpinner from '@/components/layout/LoadingSpinner'; // Replaced general Loading component
+import { db } from '@/lib/firebase';
+import { collection, getDocs, query, orderBy, limit, Timestamp } from 'firebase/firestore';
+import type { Match, Team } from '@/types';
 
 
 export default function HomePage() {
-  const { currentUser, loading, isCheckingProfile } = useAuth();
+  const { currentUser, loading: authLoading, isCheckingProfile, firebaseReady } = useAuth();
   const router = useRouter();
+  const [matches, setMatches] = useState<Match[]>([]);
+  const [matchesLoading, setMatchesLoading] = useState(true);
 
   useEffect(() => {
-    if (!loading && !isCheckingProfile && currentUser && !currentUser.isProfileComplete) {
-      router.push('/profile');
+    if (!firebaseReady) return; // Wait for Firebase to be ready
+
+    const fetchMatches = async () => {
+      if (!db) {
+        console.error("HomePage: Firestore (db) is not available for fetching matches.");
+        setMatchesLoading(false);
+        return;
+      }
+      setMatchesLoading(true);
+      try {
+        const matchesCol = collection(db, 'matches');
+        // TODO: Add filtering for upcoming matches, e.g., where('matchTime', '>', new Date())
+        // For now, just ordering by matchTime and limiting
+        const matchesQuery = query(matchesCol, orderBy('matchTime', 'asc'), limit(10));
+        const matchSnapshot = await getDocs(matchesQuery);
+        const fetchedMatches: Match[] = matchSnapshot.docs.map(doc => {
+          const data = doc.data();
+          return {
+            id: doc.id,
+            teamA: data.teamA as Team, // Assuming team data is stored directly
+            teamB: data.teamB as Team, // Or fetch team details if stored as references
+            matchTime: (data.matchTime as Timestamp).toDate(),
+            sport: data.sport,
+            league: data.league,
+            odds: data.odds,
+          };
+        });
+        setMatches(fetchedMatches);
+      } catch (error) {
+        console.error("Error fetching matches:", error);
+        // Potentially set an error state to show in UI
+      } finally {
+        setMatchesLoading(false);
+      }
+    };
+
+    fetchMatches();
+  }, [firebaseReady]); // Depend on firebaseReady
+
+  useEffect(() => {
+    if (!authLoading && !isCheckingProfile && firebaseReady) { // Ensure firebase is ready before redirect checks
+      if (currentUser && !currentUser.isProfileComplete) {
+        router.push('/profile');
+      }
     }
-  }, [currentUser, loading, isCheckingProfile, router]);
+  }, [currentUser, authLoading, isCheckingProfile, firebaseReady, router]);
 
 
-  if (loading || isCheckingProfile) {
-    return <Loading />;
+  // Combined loading state determination
+  // Show loader if firebase is not ready OR auth is loading OR profile check is in progress OR matches are loading
+  const isLoading = !firebaseReady || authLoading || isCheckingProfile || matchesLoading;
+
+
+  if (isLoading) {
+    let message = "Loading Victory Vision...";
+    if (!firebaseReady) message = "Initializing services...";
+    else if (authLoading) message = "Authenticating...";
+    else if (isCheckingProfile) message = "Checking profile...";
+    else if (matchesLoading) message = "Fetching matches...";
+    return <LoadingSpinner message={message} />;
   }
   
-  // If profile is not complete and we haven't redirected yet (rare edge case, but good for robustness)
+  // If firebase is ready, auth is done, profile checked, but user exists and profile is NOT complete
+  // (and previous useEffect for redirect hasn't kicked in fully or was bypassed by direct navigation)
   if (currentUser && !currentUser.isProfileComplete) {
-     return <Loading />; // Show loading while redirecting
+     // This should ideally be caught by the useEffect above, but as a fallback:
+     return <LoadingSpinner message="Redirecting to profile..." />;
   }
 
 
@@ -51,20 +110,23 @@ export default function HomePage() {
           </p>
         </div>
 
-        {/* Matches Section */}
-        {/* TODO: Replace mockMatches with data fetched from Firestore */}
-        <MatchList matches={mockMatches} />
+        {matches.length > 0 ? (
+           <MatchList matches={matches} />
+        ) : (
+          <div className="text-center py-10 bg-card rounded-lg shadow-md">
+            <Trophy className="mx-auto h-12 w-12 text-muted-foreground mb-4" />
+            <h3 className="text-xl font-semibold text-foreground">No Matches Available</h3>
+            <p className="text-muted-foreground">Check back soon for upcoming matches!</p>
+          </div>
+        )}
+        
 
         <Separator className="my-12" />
 
         {currentUser ? (
           <>
-            {/* AI Recommendation Section - Shown if logged in */}
             <AIRecommendationClient />
-            
             <Separator className="my-12" />
-
-            {/* User's Bets Section - Shown if logged in */}
             <UserBets />
           </>
         ) : (

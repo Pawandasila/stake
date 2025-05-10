@@ -9,32 +9,67 @@ import { useAuth } from '@/contexts/AuthContext';
 import { useRouter } from 'next/navigation';
 import { useEffect } from 'react';
 import { UserCog } from 'lucide-react';
-import Loading from '../loading';
+import LoadingSpinner from '@/components/layout/LoadingSpinner';
 
 export default function ProfilePage() {
-  const { currentUser, loading, isCheckingProfile, refreshUser } = useAuth();
+  const { currentUser, loading: authLoading, isCheckingProfile, firebaseReady, refreshUser } = useAuth();
   const router = useRouter();
 
   useEffect(() => {
-    // Initial check: if not loading and no user, redirect to login
-    if (!loading && !isCheckingProfile && !currentUser) {
-      router.push('/login');
+    if (!firebaseReady) { // Wait for Firebase services to be confirmed ready
+      return; 
     }
-    // Refresh user data when component mounts to ensure fresh profile status
-    if (currentUser) {
-        refreshUser();
-    }
-  }, [loading, isCheckingProfile, currentUser, router, refreshUser]);
 
-  // If loading auth state or user data, show a loader
-  if (loading || isCheckingProfile) {
-    return <Loading />;
+    // Initial check: if not authLoading, not checking profile, AND no currentUser after firebase is ready -> redirect to login
+    if (!authLoading && !isCheckingProfile && !currentUser) {
+      console.log("[ProfilePage] No current user after checks, redirecting to login.");
+      router.push('/login');
+      return; // Important to return after push
+    }
+    
+    // Refresh user data when component mounts AND firebase is ready AND currentUser exists
+    // This ensures we have the latest profile status.
+    if (currentUser) {
+        console.log("[ProfilePage] Firebase ready and current user exists, attempting to refresh user data.");
+        refreshUser(); // refreshUser itself will handle setCurrentUser
+    }
+  }, [firebaseReady, authLoading, isCheckingProfile, currentUser, router, refreshUser]);
+
+  // Global loading state:
+  // Show if Firebase services aren't ready OR
+  // if general auth loading is true OR
+  // if still checking initial profile status.
+  if (!firebaseReady || authLoading || isCheckingProfile) {
+    let message = "Loading profile...";
+    if (!firebaseReady) message = "Initializing services...";
+    else if (authLoading) message = "Verifying session...";
+    else if (isCheckingProfile) message = "Fetching profile details...";
+    return <LoadingSpinner message={message} />;
   }
   
-  // If still no current user after loading (e.g. redirected then navigated back), show loader before redirecting again
+  // If, after all loading is done and firebase is ready, there's still no currentUser,
+  // it implies the user is not authenticated. The useEffect above should have redirected.
+  // This is a fallback / safeguard.
   if (!currentUser) {
-    return <Loading />;
+    // This state should ideally be caught by the useEffect redirecting to /login
+    console.log("[ProfilePage] Fallback: No current user after all loading states. Showing loader, redirect should occur.");
+    return <LoadingSpinner message="Session not found, redirecting..." />;
   }
+
+  // If firebase is ready, auth loading done, profile check done, AND currentUser EXISTS but profile is complete,
+  // and user somehow landed on /profile, redirect them to home.
+  // This is less critical than the incomplete profile case for / but good for UX.
+  // Note: The primary redirect for completed profiles from /login or /signup is handled in those pages or AuthContext.
+  // This is more for if a logged-in, profile-complete user types /profile directly.
+  // Consider if this redirect is always desired. For now, it's commented out as main concern is incomplete profiles.
+  /*
+  if (currentUser.isProfileComplete) {
+    console.log("[ProfilePage] User profile is complete, redirecting to home.");
+    router.push('/');
+    return <LoadingSpinner message="Redirecting..." />; // Show loader during redirect
+  }
+  */
+
 
   return (
     <div className="flex flex-col min-h-screen bg-background text-foreground">
