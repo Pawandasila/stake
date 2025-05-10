@@ -12,8 +12,9 @@ import {
   signInWithEmailAndPassword,
   updateProfile as updateFirebaseProfile,
 } from 'firebase/auth';
-import { auth, googleProvider, db } from '@/lib/firebase'; 
+import { auth, googleProvider, db, storage } from '@/lib/firebase'; 
 import { doc, setDoc, getDoc, serverTimestamp, updateDoc } from 'firebase/firestore';
+import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
 import { useRouter, usePathname } from 'next/navigation'; 
 import LoadingSpinner from '@/components/layout/LoadingSpinner';
 import { useToast } from '@/hooks/use-toast';
@@ -76,20 +77,21 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         }
       } catch (error) {
         console.error("RefreshUser: Error fetching user document:", error);
-        // Potentially toast an error if this manual refresh fails visibly
       }
     }
     return null;
-  }, [toast]);
+  }, []);
 
 
   useEffect(() => {
-    if (!auth) {
-      console.error("AuthContext Effect: Firebase Auth is not initialized. User authentication cannot proceed.");
-      // toast(authUnavailableError()); // Avoid toast on initial load if auth is just not ready
+    if (!auth || !db) {
+      console.error("AuthContext Effect: Firebase Auth or Firestore is not initialized. User authentication cannot proceed.");
       setLoading(false);
       setIsCheckingProfile(false);
       setCurrentUser(null);
+      if (pathname !== '/login' && pathname !== '/signup') {
+        // Consider redirecting to an error page or showing a global banner
+      }
       return;
     }
 
@@ -98,19 +100,6 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       setIsCheckingProfile(true);
       try {
         if (firebaseUser) {
-          if (!db) {
-            console.error("AuthContext: Firestore (db) is not initialized. Cannot fetch user profile data.");
-            toast({ title: "Database Error", description: "User profile service is unavailable.", variant: "destructive" });
-            const partialUser = mapFirebaseUserToAppUser(firebaseUser);
-            setCurrentUser(partialUser);
-            // setLoading(false); // Will be handled by finally
-            // setIsCheckingProfile(false); // Will be handled by finally
-            if (pathname !== '/profile' && pathname !== '/login' && pathname !== '/signup') {
-              // router.push('/profile'); 
-            }
-            return; // Return early, finally will still execute
-          }
-
           try {
             const userDocRef = doc(db, "users", firebaseUser.uid);
             const userDocSnap = await getDoc(userDocRef);
@@ -152,14 +141,13 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             }
           } catch (firestoreError: any) {
             console.error("AuthContext: Firestore error during onAuthStateChanged user processing:", firestoreError);
-            // Avoid toast if it's a network error that might be transient
             if (firestoreError.code !== 'unavailable') {
               toast({ title: "Data Sync Error", description: `Could not sync your profile data: ${firestoreError.message}`, variant: "destructive" });
             }
             const partialUser = mapFirebaseUserToAppUser(firebaseUser, { isProfileComplete: false });
             setCurrentUser(partialUser);
-            if (pathname !== '/profile' && pathname !== '/login' && pathname !== '/signup') {
-              // router.push('/profile');
+             if (pathname !== '/profile' && pathname !== '/login' && pathname !== '/signup') {
+              // Potentially redirect to profile if partial user data indicates incompleteness
             }
           }
         } else {
@@ -179,7 +167,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   }, [router, pathname, toast]); 
 
   const signInWithGoogle = async () => {
-    if (!auth || !googleProvider) {
+    if (!auth || !googleProvider || !db) {
       toast(authUnavailableError());
       return;
     }
@@ -187,41 +175,33 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     try {
       const result = await signInWithPopup(auth, googleProvider);
       const firebaseUser = result.user;
-      if (firebaseUser && db) {
+      if (firebaseUser) {
          const userDocRef = doc(db, "users", firebaseUser.uid);
          const userDocSnap = await getDoc(userDocRef);
-         if (userDocSnap.exists()) { // If user exists, update last login
+         if (userDocSnap.exists()) { 
             await updateDoc(userDocRef, { lastLogin: serverTimestamp() });
          }
-         // New user doc creation and profile completion check is handled by onAuthStateChanged
       }
     } catch (error: any) {
       console.error("Error signing in with Google: ", error);
-      if(error.code !== 'auth/popup-closed-by-user'){
+      if(error.code !== 'auth/popup-closed-by-user' && error.code !== 'auth/cancelled-popup-request'){
         toast({ title: "Sign-in Error", description: error.message || "Failed to sign in with Google.", variant: "destructive" });
       }
-    } finally {
-      // setLoading(false); // onAuthStateChanged will set loading states
     }
   };
 
   const signUpWithEmail = async (email: string, password: string, displayName: string): Promise<FirebaseUser | null> => {
-    if (!auth) {
+    if (!auth || !db ) {
       toast(authUnavailableError());
       return null;
     }
-    if (!db) {
-        toast({ title: "Database Error", description: "Account creation service is unavailable.", variant: "destructive" });
-        return null;
-    }
-
     setLoading(true);
     try {
       const userCredential = await createUserWithEmailAndPassword(auth, email, password);
       const firebaseUser = userCredential.user;
 
       await updateFirebaseProfile(firebaseUser, { displayName });
-
+      // User doc creation and wallet init is handled by onAuthStateChanged
       toast({ title: "Account Created!", description: "Welcome! Please complete your profile.", className: "bg-primary text-primary-foreground" });
       return firebaseUser;
     } catch (error: any) {
@@ -234,18 +214,14 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       toast({ title: "Sign-up Error", description: message, variant: "destructive" });
       return null;
     } finally {
-       setLoading(false); // Explicitly set loading false here
+       setLoading(false); 
     }
   };
   
   const signInWithEmail = async (email: string, password: string): Promise<FirebaseUser | null> => {
-    if (!auth) {
+    if (!auth || !db) {
       toast(authUnavailableError());
       return null;
-    }
-     if (!db) {
-        toast({ title: "Database Error", description: "Login service is unavailable.", variant: "destructive" });
-        return null;
     }
     setLoading(true);
     try {
@@ -264,7 +240,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       toast({ title: "Sign-in Error", description: message, variant: "destructive" });
       return null;
     } finally {
-      setLoading(false); // Explicitly set loading false here
+      setLoading(false); 
     }
   };
 
@@ -276,24 +252,22 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     setLoading(true); 
     try {
       await firebaseSignOut(auth);
+      setCurrentUser(null); // Clear user state immediately
       router.push('/login'); 
     } catch (error: any) {
       console.error("Error signing out: ", error);
       toast({ title: "Sign-out Error", description: error.message || "Failed to sign out.", variant: "destructive" });
     } finally {
-      setLoading(false); // Explicitly set loading false here
+      setLoading(false); 
     }
   };
   
   const updateUserProfile = async (profileData: ProfileFormData) => {
-    if (!auth || !currentUser || !currentUser.uid ) { 
+    if (!auth || !currentUser || !currentUser.uid || !db || !storage) { 
       toast(authUnavailableError());
       return;
     }
-    if (!db) {
-        toast({ title: "Database Error", description: "Profile update service is unavailable.", variant: "destructive" });
-        return;
-    }
+    
     setLoading(true);
     setIsCheckingProfile(true);
     try {
@@ -306,9 +280,18 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         return;
       }
 
+      let photoDownloadURL = currentUser.photoURL || fbUser.photoURL || null;
+
+      if (profileData.photoFile) {
+        const filePath = `profileImages/${currentUser.uid}/${profileData.photoFile.name}`;
+        const storageRef = ref(storage, filePath);
+        await uploadBytes(storageRef, profileData.photoFile);
+        photoDownloadURL = await getDownloadURL(storageRef);
+      }
+
       const updateData: Partial<User> = {
         displayName: profileData.displayName,
-        photoURL: profileData.photoURL || currentUser.photoURL || fbUser.photoURL || null,
+        photoURL: photoDownloadURL,
         address: profileData.address,
         dob: profileData.dob,
         bankName: profileData.bankName,
@@ -318,7 +301,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       
       await updateFirebaseProfile(fbUser, {
         displayName: profileData.displayName,
-        photoURL: profileData.photoURL || fbUser.photoURL || null, 
+        photoURL: photoDownloadURL, 
       });
       
       await updateDoc(userDocRef, updateData);
@@ -340,7 +323,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }
   };
 
-  if (loading || (isCheckingProfile && !pathname.startsWith('/login') && !pathname.startsWith('/signup'))) {
+  if (loading || (isCheckingProfile && !currentUser && pathname !== '/login' && pathname !== '/signup')) {
     return <LoadingSpinner />; 
   }
   
@@ -359,4 +342,3 @@ export const useAuth = (): AuthContextType => {
   }
   return context;
 };
-

@@ -1,7 +1,7 @@
 // src/components/profile/ProfileForm.tsx
 "use client";
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import * as z from 'zod';
@@ -22,17 +22,18 @@ import {
 import { cn } from "@/lib/utils"
 import { format, differenceInYears, isValid, parseISO } from "date-fns"
 import { Calendar as CalendarIcon } from "lucide-react"
+import { useToast } from '@/hooks/use-toast';
 
 
 const profileSchema = z.object({
   displayName: z.string().min(2, "Display name must be at least 2 characters.").max(50,"Display name too long."),
-  photoURL: z.string().url("Must be a valid URL for photo.").optional().or(z.literal('')),
   address: z.string().min(5, "Address seems too short.").max(200, "Address too long.").optional().or(z.literal('')),
   dob: z.string().optional().refine(val => !val || /^\d{4}-\d{2}-\d{2}$/.test(val), {
     message: "Date of birth must be in YYYY-MM-DD format or empty.",
   }),
   bankName: z.string().max(50, "Bank name too long.").optional().or(z.literal('')),
   accountNumber: z.string().max(30, "Account number too long.").optional().or(z.literal('')),
+  // photoFile is handled separately and not part of Zod schema validation here
 });
 
 
@@ -40,12 +41,14 @@ export default function ProfileForm() {
   const { currentUser, updateUserProfile, loading: authLoading, refreshUser } = useAuth();
   const [isLoading, setIsLoading] = useState(false);
   const [age, setAge] = useState<number | null>(null);
+  const [imagePreview, setImagePreview] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const { toast } = useToast();
   
-  const form = useForm<ProfileFormData>({
+  const form = useForm<Omit<ProfileFormData, 'photoFile'>>({ // Zod schema handles these fields
     resolver: zodResolver(profileSchema),
     defaultValues: {
       displayName: "",
-      photoURL: "",
       address: "",
       dob: "",
       bankName: "",
@@ -53,11 +56,14 @@ export default function ProfileForm() {
     },
   });
 
+  // For handling photoFile separately, not through react-hook-form's direct state for Zod
+  const [photoFile, setPhotoFile] = useState<File | null | undefined>(undefined);
+
+
   useEffect(() => {
     if (currentUser) {
       form.reset({
         displayName: currentUser.displayName || "",
-        photoURL: currentUser.photoURL || "",
         address: currentUser.address || "",
         dob: currentUser.dob || "",
         bankName: currentUser.bankName || "",
@@ -68,6 +74,9 @@ export default function ProfileForm() {
         if (isValid(birthDate)) {
           setAge(differenceInYears(new Date(), birthDate));
         }
+      }
+      if (currentUser.photoURL) {
+        setImagePreview(currentUser.photoURL);
       }
     }
   }, [currentUser, form]);
@@ -83,11 +92,40 @@ export default function ProfileForm() {
     }
   };
 
+  const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (file) {
+      if (file.size > 2 * 1024 * 1024) { // 2MB limit
+        toast({ title: "File Too Large", description: "Profile picture cannot exceed 2MB.", variant: "destructive" });
+        if(fileInputRef.current) fileInputRef.current.value = ""; // Reset file input
+        return;
+      }
+      if (!['image/jpeg', 'image/png', 'image/gif', 'image/webp'].includes(file.type)) {
+        toast({ title: "Invalid File Type", description: "Please select a JPG, PNG, GIF or WEBP image.", variant: "destructive" });
+        if(fileInputRef.current) fileInputRef.current.value = ""; // Reset file input
+        return;
+      }
+      setPhotoFile(file);
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        setImagePreview(reader.result as string);
+      };
+      reader.readAsDataURL(file);
+    } else {
+      setPhotoFile(null); // Clear if no file selected or selection cancelled
+      setImagePreview(currentUser?.photoURL || null); // Revert to current user's photo or null
+    }
+  };
 
-  async function onSubmit(values: ProfileFormData) {
+
+  async function onSubmit(values: Omit<ProfileFormData, 'photoFile'>) {
     setIsLoading(true);
+    const fullProfileData: ProfileFormData = {
+      ...values,
+      photoFile: photoFile, // Add the manually managed photoFile
+    };
     try {
-      await updateUserProfile(values);
+      await updateUserProfile(fullProfileData);
       // Redirect is handled by AuthContext or page effect after profile update
     } catch (err) {
       // Error toast handled by updateUserProfile
@@ -96,45 +134,47 @@ export default function ProfileForm() {
     }
   }
 
-  const currentPhotoURL = form.watch("photoURL");
-
   return (
     <Form {...form}>
       <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-8">
         <div className="flex flex-col items-center space-y-4">
-          {currentPhotoURL ? (
+          {imagePreview ? (
             <Image 
-              src={currentPhotoURL} 
+              src={imagePreview} 
               alt="Profile Preview" 
               width={128} 
               height={128} 
               className="rounded-full object-cover h-32 w-32 border-2 border-primary"
               data-ai-hint="user avatar"
-              onError={(e) => {
-                // Handle image load error, e.g., set to a fallback or clear
-                console.warn("Error loading image:", e);
-                form.setValue("photoURL", ""); 
+              onError={() => {
+                setImagePreview(null); // Fallback if preview URL is broken
               }}
             />
           ) : (
             <UserCircle2 className="h-32 w-32 text-muted-foreground" />
           )}
-           <FormField
-            control={form.control}
-            name="photoURL"
-            render={({ field }) => (
-              <FormItem className="w-full">
-                <FormLabel>Profile Photo URL</FormLabel>
-                <FormControl>
-                  <Input placeholder="https://example.com/your-photo.jpg" {...field} />
-                </FormControl>
-                <FormDescription>
-                  Enter the URL of your profile picture.
-                </FormDescription>
-                <FormMessage />
-              </FormItem>
-            )}
-          />
+           <FormItem className="w-full">
+             <FormLabel htmlFor="photoFile">Profile Photo</FormLabel>
+              <FormControl>
+                <div className="relative">
+                  <Input 
+                    id="photoFile"
+                    type="file" 
+                    accept="image/jpeg,image/png,image/gif,image/webp"
+                    onChange={handleFileChange}
+                    className="block w-full text-sm text-muted-foreground file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-primary/10 file:text-primary hover:file:bg-primary/20 cursor-pointer"
+                    ref={fileInputRef}
+                  />
+                   <div className="absolute inset-y-0 right-0 flex items-center pr-3 pointer-events-none">
+                     <UploadCloud className="h-5 w-5 text-muted-foreground" />
+                   </div>
+                </div>
+              </FormControl>
+              <FormDescription>
+                Upload a new profile picture (max 2MB, JPG/PNG/GIF/WEBP).
+              </FormDescription>
+              <FormMessage /> {/* For any general errors related to this field if needed */}
+            </FormItem>
         </div>
 
         <FormField
@@ -184,6 +224,9 @@ export default function ProfileForm() {
                     disabled={(date) =>
                       date > new Date() || date < new Date("1900-01-01")
                     }
+                    captionLayout="dropdown-buttons"
+                    fromYear={1900}
+                    toYear={new Date().getFullYear()}
                     initialFocus
                   />
                 </PopoverContent>

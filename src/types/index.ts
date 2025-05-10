@@ -1,5 +1,4 @@
 // src/types/index.ts
-import type { GameType as LibGameType } from '@/lib/validation'; // Import to re-export
 
 export type User = {
   uid: string;
@@ -13,11 +12,6 @@ export type User = {
   // Bank details are placeholders for simulation
   bankName?: string;
   accountNumber?: string; 
-  // Consider more structured address if needed:
-  // addressLine1?: string;
-  // city?: string;
-  // postalCode?: string;
-  // country?: string;
 };
 
 export type Team = {
@@ -41,23 +35,23 @@ export type Match = {
   };
 };
 
-export type GameType = LibGameType; // Re-export GameType
+export type GameType = 'plane' | 'other_game_type'; // Define specific game types
 
 export type PlacedBet = {
   id: string;
-  matchId: string; // For sports bets, this is the actual match ID. For game bets, could be a game instance ID.
-  matchDescription: string; // e.g., "Team A vs Team B" or "Plane Game Round #123"
-  selectedOutcome: string; // e.g., "Team A Win", "Draw", "Cashed out at 2.5x"
+  matchId: string; 
+  matchDescription: string; 
+  selectedOutcome: string; 
   stake: number;
-  odds: number; // For sports bets, fixed odds. For game bets, can be initial multiplier or final cash-out multiplier.
+  odds: number; 
   potentialWinnings: number;
-  timestamp: Date; // Time the bet was placed or action taken
-  matchTime: Date; // Time of the actual match/event (for sports bets)
-  status: 'pending' | 'won' | 'lost' | 'withdrawn' | 'cashed_out'; // Added 'cashed_out'
-  betType: 'match' | 'game'; // Distinguishes between sports match bets and game bets
-  gameType?: GameType; // Specifies the type of game if betType is 'game'
-  gameSpecificParams?: Record<string, any>; // Store any game-specific data like target multiplier for plane game
-  userId?: string; // To associate bet with a user
+  timestamp: Date; 
+  matchTime: Date; 
+  status: 'pending' | 'won' | 'lost' | 'withdrawn' | 'cashed_out'; 
+  betType: 'match' | 'game'; 
+  gameType?: GameType; 
+  gameSpecificParams?: Record<string, any>; 
+  userId?: string; 
 };
 
 export type TeamPerformanceDataPoint = {
@@ -73,9 +67,11 @@ export type TeamPerformance = {
 // For profile form
 export type ProfileFormData = {
   displayName: string;
-  photoURL?: string;
   address?: string;
   dob?: string; // YYYY-MM-DD
   bankName?: string;
   accountNumber?: string;
+  photoFile?: File | null; // For new image uploads
+  // photoURL is part of User type, not directly form data to be validated for URL format here
+  // if file is uploaded, this will be generated.
 };
