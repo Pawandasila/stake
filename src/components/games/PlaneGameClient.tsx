@@ -12,7 +12,7 @@ import GsapAnimatedNumber from '../animations/GsapAnimatedNumber';
 import { useToast } from '@/hooks/use-toast';
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, ReferenceLine, Label as RechartsLabelComponent } from 'recharts'; // Imported Label as RechartsLabelComponent
 
-type GamePhase = 'idle' | 'betting' | 'running' | 'crashed' | 'cashed_out';
+type GamePhase = 'idle' | 'betting' | 'crashed' | 'cashed_out' | 'running';
 type MultiplierDataPoint = { time: number; value: number };
 
 const MIN_BET = 1;
@@ -134,7 +134,7 @@ const PlaneGameClient = () => {
   };
 
   const handleCashOut = useCallback(() => {
-    if (gamePhase !== 'running') return;
+    if (gamePhase !== ('running' as GamePhase)) return;
     stopGameInterval();
     
     const finalCashOutMultiplier = currentMultiplier; 
@@ -175,7 +175,7 @@ const PlaneGameClient = () => {
 
 
   useEffect(() => {
-    if (gamePhase === 'running') {
+    if (gamePhase === ('running' as GamePhase)) {
       if (currentMultiplier >= crashPoint) {
         stopGameInterval(); 
         
@@ -240,7 +240,7 @@ const PlaneGameClient = () => {
     <Card className="w-full shadow-xl">
       <CardHeader>
         <div className="flex items-center justify-center gap-2 text-primary mb-2">
-            <Rocket size={32} className={gamePhase === 'running' ? 'animate-pulse': ''} />
+            <Rocket size={32} className={gamePhase === ('running' as GamePhase) ? 'animate-pulse': ''} />
             <CardTitle className="text-3xl font-bold">Plane Game</CardTitle>
         </div>
         <CardDescription className="text-center">
@@ -311,7 +311,7 @@ const PlaneGameClient = () => {
                         <RechartsLabelComponent value={`Cashed @ ${currentMultiplier.toFixed(2)}x`} position="top" fill="hsl(var(--primary))" fontSize={10} dy={-5} />
                     </ReferenceLine>
                 )}
-                {(gamePhase === 'running' || gamePhase === 'betting' || gamePhase === 'idle') && 
+                {(gamePhase === ('running' as GamePhase) || gamePhase === 'betting' || gamePhase === 'idle') && 
                   targetMultiplier.trim() !== "" && parseFloat(targetMultiplier) >= MIN_MULTIPLIER_TARGET && 
                   !isNaN(parseFloat(targetMultiplier)) && (
                    <ReferenceLine y={parseFloat(targetMultiplier)} stroke="hsl(var(--secondary))" strokeDasharray="3 3" ifOverflow="extendDomain">
@@ -335,7 +335,7 @@ const PlaneGameClient = () => {
                   value={betAmount}
                   onChange={handleBetAmountChange}
                   className="pl-10 h-11 text-md"
-                  disabled={gamePhase === 'running'}
+                  disabled={gamePhase === 'running' as GamePhase}
                 />
               </div>
             </div>
@@ -350,7 +350,7 @@ const PlaneGameClient = () => {
                   onChange={handleTargetMultiplierChange}
                   placeholder={`${MIN_MULTIPLIER_TARGET}x - ${MAX_MULTIPLIER_TARGET}x (optional)`}
                   className="pl-10 h-11 text-md"
-                  disabled={gamePhase === 'running'}
+                  disabled={gamePhase === 'running' as GamePhase}
                 />
               </div>
             </div>
@@ -363,7 +363,7 @@ const PlaneGameClient = () => {
             <Rocket className="mr-2 h-5 w-5" /> Place Bet & Start
           </Button>
         )}
-        { gamePhase === 'running' && (
+        { gamePhase === ('running' as GamePhase) && (
           <Button onClick={handleCashOut} className="w-full bg-green-500 hover:bg-green-600 text-white text-lg py-3">
             <CheckCircle2 className="mr-2 h-5 w-5" /> Cash Out @ {currentMultiplier.toFixed(2)}x
           </Button>
@@ -373,7 +373,7 @@ const PlaneGameClient = () => {
             Play Again
           </Button>
         )}
-         {gamePhase !== 'idle' && gamePhase !== 'betting' && gamePhase !== 'running' && (
+         {gamePhase !== 'idle' && gamePhase !== 'betting' && gamePhase !== ('running' as GamePhase) && (
             <p className="text-xs text-muted-foreground">Game Over. Click "Play Again" to restart.</p>
          )}
       </CardFooter>
@@ -382,5 +382,3 @@ const PlaneGameClient = () => {
 };
 
 export default PlaneGameClient;
-
-```

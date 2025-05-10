@@ -15,6 +15,10 @@ interface BaseValidationParams {
   minBetAmount?: number;
   maxBetAmount?: number;
 }
+export interface GameActionValidationResult {
+  title: string;
+  description: string; 
+}
 
 interface MatchBetValidationParams extends BaseValidationParams {
   betType: 'match';
@@ -22,7 +26,7 @@ interface MatchBetValidationParams extends BaseValidationParams {
   existingBets: PlacedBet[];
 }
 
-interface GameActionValidationParams extends BaseValidationParams {
+export interface GameActionValidationParams extends BaseValidationParams {
   gameType: GameType;
   actionType: 'place_bet' | 'cash_out' | 'other_action'; // Extend as needed
   // Add any game-specific parameters if necessary for validation
@@ -30,7 +34,7 @@ interface GameActionValidationParams extends BaseValidationParams {
 
 type ValidationParams = MatchBetValidationParams | GameActionValidationParams;
 
-export function validateBetPlacement(params: MatchBetValidationParams): ValidationError | null {
+export function validateBetPlacement(params: MatchBetValidationParams): GameActionValidationResult | null {
   const { stake, currentBalance, existingBets, matchId, minBetAmount = MIN_BET_AMOUNT, maxBetAmount = MAX_BET_AMOUNT } = params;
 
   if (isNaN(stake) || stake <= 0) {
@@ -60,7 +64,7 @@ export function validateBetPlacement(params: MatchBetValidationParams): Validati
   return null; // No validation errors
 }
 
-export function validateGameAction(params: GameActionValidationParams): ValidationError | null {
+export function validateGameAction(params: GameActionValidationParams): GameActionValidationResult | null {
   const { gameType, actionType, stake, currentBalance, minBetAmount = MIN_BET_AMOUNT, maxBetAmount = MAX_BET_AMOUNT } = params;
 
   if (actionType === 'place_bet') {
