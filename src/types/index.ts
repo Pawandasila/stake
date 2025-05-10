@@ -27,7 +27,8 @@ export type PlacedBet = {
   stake: number;
   odds: number;
   potentialWinnings: number;
-  timestamp: Date;
+  timestamp: Date; // Time the bet was placed
+  matchTime: Date; // Time of the actual match/event
   status: 'pending' | 'won' | 'lost' | 'withdrawn' | 'cashed_out_early';
 };
 
@@ -40,3 +41,4 @@ export type TeamPerformance = {
   teamId: string;
   data: TeamPerformanceDataPoint[];
 };
+

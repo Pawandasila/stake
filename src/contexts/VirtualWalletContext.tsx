@@ -14,9 +14,8 @@ interface VirtualWalletContextType {
   balance: number;
   bets: PlacedBet[];
   addFunds: (amount: number) => void;
-  placeBet: (matchId: string, matchDescription: string, selectedOutcome: string, stake: number, odds: number) => boolean;
+  placeBet: (matchId: string, matchDescription: string, selectedOutcome: string, stake: number, odds: number, matchTime: Date) => boolean;
   withdrawBet: (betId: string) => void;
-  // For Plane Game
   updateBalance: (amount: number) => void; 
 }
 
@@ -32,11 +31,21 @@ export const VirtualWalletProvider: React.FC<{ children: React.ReactNode }> = ({
     if (storedBalance) {
       setBalance(parseFloat(storedBalance));
     } else {
-      setBalance(INITIAL_VIRTUAL_BALANCE); // Ensure initial balance if nothing in storage
+      setBalance(INITIAL_VIRTUAL_BALANCE);
     }
     const storedBets = localStorage.getItem('virtualBets');
     if (storedBets) {
-      setBets(JSON.parse(storedBets).map((bet: PlacedBet) => ({...bet, timestamp: new Date(bet.timestamp), matchTime: new Date(bet.matchTime) })));
+      try {
+        const parsedBets = JSON.parse(storedBets) as Array<any>;
+        setBets(parsedBets.map((bet: any) => ({
+          ...bet, 
+          timestamp: new Date(bet.timestamp), 
+          matchTime: new Date(bet.matchTime) // Ensure matchTime is converted to Date
+        } as PlacedBet)));
+      } catch (error) {
+        console.error("Failed to parse bets from localStorage", error);
+        setBets([]); // Reset to empty array if parsing fails
+      }
     }
   }, []);
 
@@ -62,7 +71,7 @@ export const VirtualWalletProvider: React.FC<{ children: React.ReactNode }> = ({
   }, []);
 
 
-  const placeBet = useCallback((matchId: string, matchDescription: string, selectedOutcome: string, stake: number, odds: number): boolean => {
+  const placeBet = useCallback((matchId: string, matchDescription: string, selectedOutcome: string, stake: number, odds: number, matchTime: Date): boolean => {
     if (stake < MIN_BET_AMOUNT) {
       toast({ title: "Invalid Amount", description: `Minimum bet amount is ${MIN_BET_AMOUNT}.`, variant: "destructive" });
       return false;
@@ -72,39 +81,6 @@ export const VirtualWalletProvider: React.FC<{ children: React.ReactNode }> = ({
       return false;
     }
     
-    // Find the match to get its matchTime
-    // This is a simplification; in a real app, match details would be more robustly accessed.
-    // For now, assuming mockMatches or a similar source might be implicitly available or matchTime passed differently.
-    // To make this work with current structure, placeBet needs access to the match's actual matchTime.
-    // We will pass matchTime to placeBet, or find a way to get it from matchId.
-    // Let's assume for now that `matchId` somehow gives us access or we modify placeBet signature.
-    // For simplicity in this context, we'll require matchTime to be part of the bet placement process if not globally accessible.
-    // Given current structure, the matchTime is available in MatchCard when calling placeBet.
-    // So, we'll add matchTime to the PlacedBet object based on when the bet is placed.
-    // It's better if the Match object's matchTime is stored with the bet.
-
-    // Let's find the match from mockData or assume it's passed to placeBet.
-    // For simplicity, we'll add `matchTime: Date` to `placeBet` arguments.
-    // However, `PlacedBet` already has `timestamp`. The `matchTime` refers to the event.
-    // The `PlacedBet` type should store the `matchTime` of the event it's for.
-    // Modifying `placeBet` to accept `matchTime`:
-    // placeBet: (matchId: string, matchDescription: string, selectedOutcome: string, stake: number, odds: number, matchTime: Date) => boolean;
-    // This change would cascade. For now, let's assume `matchTime` is derived or passed.
-    // The current `PlacedBet` type does not have `matchTime`. This is an oversight in the original type.
-    // I will add `matchTime` to `PlacedBet` type.
-    // And modify `placeBet` to accept it. For now, I'll use a placeholder date for `matchTime` if not directly passed.
-    // Actually, the `withdrawBet` and `resolveBet` logic will need the actual matchTime.
-    // The bet object should store the matchTime of the match it's placed on.
-    
-    // Find the match details from a source - assuming it's mockMatches for this simulation
-    // This part needs a proper data source in a real app. Here, we'll simulate it.
-    // This is a critical part: how does placeBet know the match's specific matchTime?
-    // For now, I'll assume this matchTime is correctly passed into the PlacedBet object.
-    // Let's ensure the `mockMatches` `matchTime` is correctly being used when creating a bet.
-    // The `BetModal` would need to pass the `match.matchTime` along.
-    // I will proceed assuming the `matchTime` on the `PlacedBet` object is the event's start time.
-
-
     const newBet: PlacedBet = {
       id: uuidv4(),
       matchId,
@@ -114,34 +90,12 @@ export const VirtualWalletProvider: React.FC<{ children: React.ReactNode }> = ({
       odds,
       potentialWinnings: parseFloat((stake * odds).toFixed(2)),
       timestamp: new Date(), // Bet placement time
-      // `matchTime` should be the event's start time, needs to be set when bet is created.
-      // This will be handled by ensuring BetModal passes it to placeBet which stores it.
-      // For now, the `PlacedBet` type needs `matchTime` explicitly.
-      // Let's assume the `matchTime` is already part of the bet object that gets stored.
-      // For safety, I will add matchTime to the PlacedBet type and ensure it's populated.
-      // The existing PlacedBet type in `src/types/index.ts` is missing matchTime.
-      // I will add it.
-      // The `placeBet` function signature will need to accept `matchTime: Date`.
-      // Let's adjust `placeBet` to take `matchTime: Date` from the match being bet on.
-      // For the sake of this change, I'll assume it's already part of the bet structure.
-      // The provided code for `UserBets` etc. will rely on `bet.matchTime`.
-      // It seems `PlacedBet` type *should* have `matchTime` (event time). I'll ensure my version does.
-      // If it's missing from the user's current `PlacedBet` type, it's a problem.
-      // User's current PlacedBet does NOT have matchTime for the event. Only a timestamp for when the bet was placed. This is insufficient.
-      // I'll modify the `PlacedBet` type and context functions.
-
-      // Assuming matchTime is now part of the PlacedBet object being created or passed to `placeBet`.
-      // It seems `BetModal` calls `placeBet` without `matchTime`.
-      // The `PlacedBet` object in `bets` state must have the event's `matchTime`.
-      // I will modify `placeBet` to accept `matchTime` of the event.
-      // And update `BetModal` to pass it.
-      // For now, I'll make `PlacedBet` have `eventMatchTime: Date`.
-
-      status: 'pending', // status must align with PlacedBet type
+      matchTime: matchTime, // Store the event's match time
+      status: 'pending',
     };
 
     setBalance(prevBalance => parseFloat((prevBalance - stake).toFixed(2)));
-    setBets(prevBets => [newBet, ...prevBets]); // Bet object stored here MUST have eventMatchTime
+    setBets(prevBets => [newBet, ...prevBets]);
     toast({ title: "Bet Placed!", description: `Successfully placed a ${stake} unit bet on ${selectedOutcome}. Potential win: ${newBet.potentialWinnings.toFixed(2)}.`, className: "bg-primary text-primary-foreground", duration: 3000 });
     return true;
   }, [balance, toast]);
@@ -155,15 +109,12 @@ export const VirtualWalletProvider: React.FC<{ children: React.ReactNode }> = ({
         return prevBets;
       }
       const bet = prevBets[betIndex];
-
-      // Ensure bet.matchTime is a Date object if it's coming from JSON parse
       const eventTime = new Date(bet.matchTime); 
 
       if (eventTime.getTime() - Date.now() > BET_WITHDRAWAL_CUTOFF_MS) {
         const newBalance = parseFloat((balance + bet.stake).toFixed(2));
         setBalance(newBalance);
         toast({ title: "Bet Withdrawn", description: `Your bet on ${bet.matchDescription} has been withdrawn. ${bet.stake} units refunded.`, className: "bg-primary text-primary-foreground" });
-        // return prevBets.filter(b => b.id !== betId); // This would remove it
          const updatedBets = [...prevBets];
          updatedBets[betIndex] = { ...bet, status: 'withdrawn' };
          return updatedBets;
@@ -185,11 +136,10 @@ export const VirtualWalletProvider: React.FC<{ children: React.ReactNode }> = ({
     let betsChangedInLoop = false;
 
     const updatedBets = bets.map(bet => {
-        // Ensure bet.matchTime is a Date object
         const eventTime = new Date(bet.matchTime);
         if (bet.status === 'pending' && eventTime.getTime() < Date.now() - MATCH_RESOLUTION_DELAY_MS) {
             betsChangedInLoop = true;
-            const won = Math.random() < 0.4; // 40% chance to win for simulation
+            const won = Math.random() < 0.4; 
             if (won) {
                 totalWinningsThisCycle += bet.potentialWinnings;
                 toast({ title: "Bet Resolved!", description: `You WON ${bet.potentialWinnings.toFixed(2)} on ${bet.matchDescription}!`, className: "bg-primary text-primary-foreground animate-pulse", duration: 7000 });
@@ -213,7 +163,7 @@ export const VirtualWalletProvider: React.FC<{ children: React.ReactNode }> = ({
   useEffect(() => {
     const intervalId = setInterval(() => {
         resolveBetsAndUpdateState();
-    }, 30000); // Check every 30 seconds
+    }, 30000); 
 
     return () => clearInterval(intervalId);
   }, [resolveBetsAndUpdateState]);
@@ -233,3 +183,4 @@ export const useVirtualWallet = (): VirtualWalletContextType => {
   }
   return context;
 };
+
