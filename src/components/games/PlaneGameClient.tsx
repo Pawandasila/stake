@@ -147,7 +147,7 @@ const PlaneGameClient = () => {
         if (startTime) {
             const elapsedTime = (Date.now() - startTime) / 1000;
             setMultiplierHistory(prevHistory => {
-                if (prevHistory[prevHistory.length -1].value < crashPoint) {
+                if (prevHistory.length > 0 && prevHistory[prevHistory.length -1].value < crashPoint) {
                    return [...prevHistory, { time: elapsedTime, value: crashPoint }];
                 }
                 return prevHistory;
@@ -248,7 +248,9 @@ const PlaneGameClient = () => {
                   stroke={gamePhase === 'crashed' ? "hsl(var(--destructive))" : "hsl(var(--primary))"}
                   strokeWidth={3} 
                   dot={false} 
-                  isAnimationActive={true} // Changed to true for animated graph updates
+                  isAnimationActive={true} 
+                  animationDuration={90} 
+                  animationEasing="linear" 
                 />
                 {gamePhase === 'crashed' && crashPoint > 0 && (
                   <ReferenceLine y={crashPoint} stroke="hsl(var(--destructive))" strokeDasharray="4 4" ifOverflow="extendDomain">
@@ -329,3 +331,4 @@ const PlaneGameClient = () => {
 };
 
 export default PlaneGameClient;
+
