@@ -7,12 +7,11 @@ import { format } from 'date-fns';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { Separator } from '@/components/ui/separator';
-import { Clock, Shield, Swords, Trophy, Zap } from 'lucide-react';
+import { Clock, Shield, Swords, Trophy, Zap, Users, BarChart } from 'lucide-react'; // Added Users
 import React, { useState, useEffect } from 'react';
 import BetModal from '@/components/betting/BetModal';
-import { BarChart } from 'lucide-react';
-import TeamPerformanceBarChart from '@/components/charts/TeamPerformanceBarChart'; // Assuming this exists
-import { mockTeamPerformance } from '@/lib/mockData'; // For chart example
+import TeamPerformanceBarChart from '@/components/charts/TeamPerformanceBarChart';
+import { mockTeamPerformance } from '@/lib/mockData';
 
 interface MatchCardProps {
   match: Match;
@@ -38,13 +37,14 @@ const MatchCard: React.FC<MatchCardProps> = ({ match }) => {
   const [selectedOutcome, setSelectedOutcome] = useState<{ name: string; odds: number } | null>(null);
   const [showChart, setShowChart] = useState(false);
   const [timeToMatch, setTimeToMatch] = useState('');
+  const [bettorsCount, setBettorsCount] = useState<number | null>(null);
 
   useEffect(() => {
     const calculateTime = () => {
       const now = new Date();
       const diff = match.matchTime.getTime() - now.getTime();
       if (diff <= 0) {
-        setTimeToMatch("Live / Finished"); // Or handle live scores
+        setTimeToMatch("Live / Finished");
         return;
       }
       const hours = Math.floor(diff / (1000 * 60 * 60));
@@ -52,9 +52,15 @@ const MatchCard: React.FC<MatchCardProps> = ({ match }) => {
       setTimeToMatch(`${hours}h ${minutes}m`);
     };
     calculateTime();
-    const interval = setInterval(calculateTime, 60000); // Update every minute
+    const interval = setInterval(calculateTime, 60000);
     return () => clearInterval(interval);
   }, [match.matchTime]);
+
+  useEffect(() => {
+    // Simulate fetching bettors count
+    setBettorsCount(Math.floor(Math.random() * 200) + 20); // Random number between 20 and 220
+  }, []);
+
 
   const handleBetButtonClick = (name: string, odds: number) => {
     setSelectedOutcome({ name, odds });
@@ -68,7 +74,7 @@ const MatchCard: React.FC<MatchCardProps> = ({ match }) => {
     switch (sport.toLowerCase()) {
       case 'football': return <Swords className="h-4 w-4 text-muted-foreground" />;
       case 'esports': return <Zap className="h-4 w-4 text-muted-foreground" />;
-      case 'basketball': return <Shield className="h-4 w-4 text-muted-foreground" />; // Placeholder, find basketball icon
+      case 'basketball': return <Shield className="h-4 w-4 text-muted-foreground" />; 
       default: return <Trophy className="h-4 w-4 text-muted-foreground" />;
     }
   };
@@ -80,6 +86,13 @@ const MatchCard: React.FC<MatchCardProps> = ({ match }) => {
           <div className="flex items-center gap-1.5">
             {getSportIcon(match.sport)}
             <span>{match.sport} {match.league ? `- ${match.league}` : ''}</span>
+          </div>
+           <div className="flex items-center gap-1.5">
+            {bettorsCount !== null && (
+              <div className="flex items-center gap-1 text-muted-foreground">
+                <Users className="h-3 w-3" /> {bettorsCount}
+              </div>
+            )}
           </div>
           <div className="flex items-center gap-1.5">
             <Clock className="h-4 w-4" />
@@ -121,7 +134,7 @@ const MatchCard: React.FC<MatchCardProps> = ({ match }) => {
         >
           {match.teamA.name.substring(0,3).toUpperCase()} Wins <span className="font-bold ml-1">@{match.odds.teamAWin.toFixed(2)}</span>
         </Button>
-        {match.odds.draw > 0 && ( // Only show draw if applicable
+        {match.odds.draw > 0 && (
           <Button 
             variant="outline" 
             className="w-full text-xs md:text-sm py-2 h-auto border-muted-foreground/50 hover:bg-secondary/50"
@@ -132,7 +145,7 @@ const MatchCard: React.FC<MatchCardProps> = ({ match }) => {
         )}
          <Button 
           variant="outline" 
-          className={`w-full text-xs md:text-sm py-2 h-auto border-primary/50 hover:bg-primary/10 text-primary ${match.odds.draw === 0 ? 'col-start-2' : ''}`} // Adjust grid if no draw
+          className={`w-full text-xs md:text-sm py-2 h-auto border-primary/50 hover:bg-primary/10 text-primary ${match.odds.draw === 0 ? 'col-start-2' : ''}`}
           onClick={() => handleBetButtonClick(`${match.teamB.name} Win`, match.odds.teamBWin)}
         >
           {match.teamB.name.substring(0,3).toUpperCase()} Wins <span className="font-bold ml-1">@{match.odds.teamBWin.toFixed(2)}</span>
@@ -156,6 +169,7 @@ const MatchCard: React.FC<MatchCardProps> = ({ match }) => {
           matchDescription={`${match.teamA.name} vs ${match.teamB.name}`}
           selectedOutcomeName={selectedOutcome.name}
           odds={selectedOutcome.odds}
+          eventMatchTime={match.matchTime} // Pass the event's match time
         />
       )}
     </Card>

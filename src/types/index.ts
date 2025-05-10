@@ -28,7 +28,7 @@ export type PlacedBet = {
   odds: number;
   potentialWinnings: number;
   timestamp: Date;
-  status: 'pending' | 'won' | 'lost'; // For future development
+  status: 'pending' | 'won' | 'lost' | 'withdrawn' | 'cashed_out_early';
 };
 
 export type TeamPerformanceDataPoint = {

@@ -26,6 +26,7 @@ interface BetModalProps {
   matchDescription: string;
   selectedOutcomeName: string;
   odds: number;
+  eventMatchTime: Date; // Added eventMatchTime
 }
 
 const BetModal: React.FC<BetModalProps> = ({
@@ -35,6 +36,7 @@ const BetModal: React.FC<BetModalProps> = ({
   matchDescription,
   selectedOutcomeName,
   odds,
+  eventMatchTime, // Use eventMatchTime
 }) => {
   const [stake, setStake] = useState<number>(MIN_BET_AMOUNT);
   const [potentialWinnings, setPotentialWinnings] = useState<number>(0);
@@ -50,7 +52,6 @@ const BetModal: React.FC<BetModalProps> = ({
   }, [stake, odds]);
 
   useEffect(() => {
-    // Reset stake when modal opens for a new bet
     if (isOpen) {
       setStake(MIN_BET_AMOUNT);
       setError('');
@@ -64,7 +65,7 @@ const BetModal: React.FC<BetModalProps> = ({
     } else {
       setStake(value);
     }
-    setError(''); // Clear error on change
+    setError(''); 
   };
 
   const validateAndPlaceBet = () => {
@@ -82,16 +83,12 @@ const BetModal: React.FC<BetModalProps> = ({
     }
     setError('');
     
-    const success = placeBet(matchId, matchDescription, selectedOutcomeName, stake, odds);
+    // Pass eventMatchTime to placeBet
+    const success = placeBet(matchId, matchDescription, selectedOutcomeName, stake, odds, eventMatchTime);
     if (success) {
       onClose();
     }
   };
-
-  const quickStake = (amount: number) => {
-    setStake(prev => Math.min(Math.max(prev + amount, 0), balance));
-    setError('');
-  }
 
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
