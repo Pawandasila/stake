@@ -12,10 +12,10 @@ import {
   signInWithEmailAndPassword,
   updateProfile as updateFirebaseProfile,
 } from 'firebase/auth';
-import { auth, googleProvider, db } from '@/lib/firebase'; // `auth` here can be null if Firebase init failed
+import { auth, googleProvider, db } from '@/lib/firebase'; 
 import { doc, setDoc, getDoc, serverTimestamp, updateDoc } from 'firebase/firestore';
 import { useRouter, usePathname } from 'next/navigation'; 
-import Loading from '@/app/loading';
+import LoadingSpinner from '@/components/layout/LoadingSpinner';
 import { useToast } from '@/hooks/use-toast';
 import { INITIAL_VIRTUAL_BALANCE } from '@/lib/constants';
 
@@ -41,7 +41,7 @@ const authUnavailableError = () => {
 export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
-  const [isCheckingProfile, setIsCheckingProfile] = useState(true); // For profile completion check
+  const [isCheckingProfile, setIsCheckingProfile] = useState(true); 
   const router = useRouter();
   const pathname = usePathname();
   const { toast } = useToast();
@@ -58,104 +58,125 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   
   const refreshUser = useCallback(async () => {
     if (!auth) {
-      // console.warn("refreshUser: Firebase Auth is not initialized."); // Already handled by initial onAuthStateChanged
+      console.warn("refreshUser: Firebase Auth is not initialized.");
       return null;
     }
     const fbUser = auth.currentUser;
     if (fbUser && db) {
-      const userDocRef = doc(db, "users", fbUser.uid);
-      const userDocSnap = await getDoc(userDocRef);
-      if (userDocSnap.exists()) {
-        const firestoreData = userDocSnap.data();
-        const updatedAppUser = mapFirebaseUserToAppUser(fbUser, firestoreData);
-        setCurrentUser(updatedAppUser);
-        return updatedAppUser;
+      try {
+        const userDocRef = doc(db, "users", fbUser.uid);
+        const userDocSnap = await getDoc(userDocRef);
+        if (userDocSnap.exists()) {
+          const firestoreData = userDocSnap.data();
+          const updatedAppUser = mapFirebaseUserToAppUser(fbUser, firestoreData);
+          setCurrentUser(updatedAppUser);
+          return updatedAppUser;
+        } else {
+           console.warn(`refreshUser: No user document found for UID: ${fbUser.uid}`);
+        }
+      } catch (error) {
+        console.error("RefreshUser: Error fetching user document:", error);
+        // Potentially toast an error if this manual refresh fails visibly
       }
     }
     return null;
-  }, []);
+  }, [toast]);
 
 
   useEffect(() => {
     if (!auth) {
       console.error("AuthContext Effect: Firebase Auth is not initialized. User authentication cannot proceed.");
-      toast(authUnavailableError());
+      // toast(authUnavailableError()); // Avoid toast on initial load if auth is just not ready
       setLoading(false);
       setIsCheckingProfile(false);
       setCurrentUser(null);
-      // Optionally, redirect to an error page or show a persistent banner
       return;
     }
 
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
       setLoading(true);
       setIsCheckingProfile(true);
-      if (firebaseUser) {
-        if (!db) {
-          console.error("AuthContext: Firestore (db) is not initialized. Cannot fetch user profile data.");
-          toast({ title: "Database Error", description: "User profile service is unavailable.", variant: "destructive" });
-          // Keep the Firebase user but profile might be incomplete
-          const partialUser = mapFirebaseUserToAppUser(firebaseUser);
-          setCurrentUser(partialUser);
-          setLoading(false);
-          setIsCheckingProfile(false);
-          // Potentially redirect to a degraded experience or error page
-          if (pathname !== '/profile' && pathname !== '/login' && pathname !== '/signup') {
-            router.push('/profile'); // Force profile if DB is down, as we can't check completeness
-          }
-          return;
-        }
-
-        const userDocRef = doc(db, "users", firebaseUser.uid);
-        const userDocSnap = await getDoc(userDocRef);
-        let appUser: User;
-
-        if (userDocSnap.exists()) {
-          const firestoreData = userDocSnap.data();
-          appUser = mapFirebaseUserToAppUser(firebaseUser, firestoreData);
-        } else {
-          // New user (likely via Google Sign-In for the first time or first email signup)
-          const initialUserData: Partial<User> & {createdAt: any, lastLogin: any, isProfileComplete: boolean} = {
-            email: firebaseUser.email,
-            displayName: firebaseUser.displayName,
-            photoURL: firebaseUser.photoURL,
-            createdAt: serverTimestamp(),
-            lastLogin: serverTimestamp(),
-            isProfileComplete: false, 
-          };
-          try {
-            await setDoc(userDocRef, initialUserData, { merge: true });
-            
-            const userWalletRef = doc(db, "wallets", firebaseUser.uid);
-            const walletSnap = await getDoc(userWalletRef);
-            if (!walletSnap.exists()) {
-              await setDoc(userWalletRef, { balance: INITIAL_VIRTUAL_BALANCE, userId: firebaseUser.uid });
+      try {
+        if (firebaseUser) {
+          if (!db) {
+            console.error("AuthContext: Firestore (db) is not initialized. Cannot fetch user profile data.");
+            toast({ title: "Database Error", description: "User profile service is unavailable.", variant: "destructive" });
+            const partialUser = mapFirebaseUserToAppUser(firebaseUser);
+            setCurrentUser(partialUser);
+            // setLoading(false); // Will be handled by finally
+            // setIsCheckingProfile(false); // Will be handled by finally
+            if (pathname !== '/profile' && pathname !== '/login' && pathname !== '/signup') {
+              // router.push('/profile'); 
             }
-            appUser = mapFirebaseUserToAppUser(firebaseUser, initialUserData as Record<string, any>);
-          } catch (dbError) {
-            console.error("AuthContext: Error creating user document or wallet in Firestore:", dbError);
-            toast({ title: "Account Setup Error", description: "Could not fully set up your account details.", variant: "destructive"});
-            appUser = mapFirebaseUserToAppUser(firebaseUser, {isProfileComplete: false}); // Assume profile incomplete
+            return; // Return early, finally will still execute
           }
-        }
-        setCurrentUser(appUser);
-        
-        if (!appUser.isProfileComplete && pathname !== '/profile' && pathname !== '/login' && pathname !== '/signup') {
-          router.push('/profile');
-        } else if (appUser.isProfileComplete && (pathname === '/login' || pathname === '/signup')) {
-          router.push('/');
-        }
 
-      } else {
+          try {
+            const userDocRef = doc(db, "users", firebaseUser.uid);
+            const userDocSnap = await getDoc(userDocRef);
+            let appUser: User;
+
+            if (userDocSnap.exists()) {
+              const firestoreData = userDocSnap.data();
+              appUser = mapFirebaseUserToAppUser(firebaseUser, firestoreData);
+            } else {
+              const initialUserData: Partial<User> & {createdAt: any, lastLogin: any, isProfileComplete: boolean} = {
+                email: firebaseUser.email,
+                displayName: firebaseUser.displayName,
+                photoURL: firebaseUser.photoURL,
+                createdAt: serverTimestamp(),
+                lastLogin: serverTimestamp(),
+                isProfileComplete: false, 
+              };
+              try {
+                await setDoc(userDocRef, initialUserData, { merge: true });
+                
+                const userWalletRef = doc(db, "wallets", firebaseUser.uid);
+                const walletSnap = await getDoc(userWalletRef);
+                if (!walletSnap.exists()) {
+                  await setDoc(userWalletRef, { balance: INITIAL_VIRTUAL_BALANCE, userId: firebaseUser.uid });
+                }
+                appUser = mapFirebaseUserToAppUser(firebaseUser, initialUserData as Record<string, any>);
+              } catch (dbError) {
+                console.error("AuthContext: Error creating user document or wallet in Firestore:", dbError);
+                toast({ title: "Account Setup Error", description: "Could not fully set up your account details.", variant: "destructive"});
+                appUser = mapFirebaseUserToAppUser(firebaseUser, {isProfileComplete: false}); 
+              }
+            }
+            setCurrentUser(appUser);
+            
+            if (!appUser.isProfileComplete && pathname !== '/profile' && pathname !== '/login' && pathname !== '/signup') {
+              router.push('/profile');
+            } else if (appUser.isProfileComplete && (pathname === '/login' || pathname === '/signup')) {
+              router.push('/');
+            }
+          } catch (firestoreError: any) {
+            console.error("AuthContext: Firestore error during onAuthStateChanged user processing:", firestoreError);
+            // Avoid toast if it's a network error that might be transient
+            if (firestoreError.code !== 'unavailable') {
+              toast({ title: "Data Sync Error", description: `Could not sync your profile data: ${firestoreError.message}`, variant: "destructive" });
+            }
+            const partialUser = mapFirebaseUserToAppUser(firebaseUser, { isProfileComplete: false });
+            setCurrentUser(partialUser);
+            if (pathname !== '/profile' && pathname !== '/login' && pathname !== '/signup') {
+              // router.push('/profile');
+            }
+          }
+        } else {
+          setCurrentUser(null);
+        }
+      } catch (e: any) {
+        console.error("AuthContext: Unexpected error in onAuthStateChanged handler:", e);
+        toast({ title: "Authentication Error", description: `An unexpected error occurred: ${e.message}`, variant: "destructive" });
         setCurrentUser(null);
-        // No specific redirect here unless desired for all logged-out states
+      } finally {
+        setLoading(false);
+        setIsCheckingProfile(false);
       }
-      setLoading(false);
-      setIsCheckingProfile(false);
     });
 
     return () => unsubscribe();
-  }, [router, pathname]); // `auth` and `db` are stable or null, so not strictly needed in deps if handled at top
+  }, [router, pathname, toast]); 
 
   const signInWithGoogle = async () => {
     if (!auth || !googleProvider) {
@@ -169,28 +190,28 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       if (firebaseUser && db) {
          const userDocRef = doc(db, "users", firebaseUser.uid);
          const userDocSnap = await getDoc(userDocRef);
-         if (userDocSnap.exists()) {
+         if (userDocSnap.exists()) { // If user exists, update last login
             await updateDoc(userDocRef, { lastLogin: serverTimestamp() });
          }
-         // New user doc creation is handled by onAuthStateChanged
+         // New user doc creation and profile completion check is handled by onAuthStateChanged
       }
     } catch (error: any) {
       console.error("Error signing in with Google: ", error);
-      toast({ title: "Sign-in Error", description: error.message || "Failed to sign in with Google.", variant: "destructive" });
+      if(error.code !== 'auth/popup-closed-by-user'){
+        toast({ title: "Sign-in Error", description: error.message || "Failed to sign in with Google.", variant: "destructive" });
+      }
     } finally {
-      setLoading(false); // onAuthStateChanged will also set loading, but this handles immediate UI feedback on error
+      // setLoading(false); // onAuthStateChanged will set loading states
     }
   };
 
   const signUpWithEmail = async (email: string, password: string, displayName: string): Promise<FirebaseUser | null> => {
     if (!auth) {
       toast(authUnavailableError());
-      setLoading(false);
       return null;
     }
     if (!db) {
         toast({ title: "Database Error", description: "Account creation service is unavailable.", variant: "destructive" });
-        setLoading(false);
         return null;
     }
 
@@ -201,46 +222,29 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
       await updateFirebaseProfile(firebaseUser, { displayName });
 
-      const userDocRef = doc(db, "users", firebaseUser.uid);
-      const initialUserData: Partial<User> & {createdAt: any, lastLogin: any, isProfileComplete: boolean} = {
-        uid: firebaseUser.uid,
-        email: firebaseUser.email,
-        displayName: displayName,
-        photoURL: firebaseUser.photoURL, 
-        createdAt: serverTimestamp(),
-        lastLogin: serverTimestamp(),
-        isProfileComplete: false,
-      };
-      await setDoc(userDocRef, initialUserData);
-
-      const userWalletRef = doc(db, "wallets", firebaseUser.uid);
-      await setDoc(userWalletRef, { balance: INITIAL_VIRTUAL_BALANCE, userId: firebaseUser.uid });
-
       toast({ title: "Account Created!", description: "Welcome! Please complete your profile.", className: "bg-primary text-primary-foreground" });
-      // onAuthStateChanged will handle setting currentUser and redirection to /profile
       return firebaseUser;
     } catch (error: any) {
       console.error("Error signing up with email: ", error);
-      // Firebase often provides good error messages, e.g., auth/email-already-in-use
       const message = error.code === 'auth/email-already-in-use' 
         ? "This email address is already in use. Try logging in."
+        : error.code === 'auth/network-request-failed'
+        ? "Network error. Please check your connection and try again."
         : error.message || "Failed to create account.";
       toast({ title: "Sign-up Error", description: message, variant: "destructive" });
       return null;
     } finally {
-      setLoading(false);
+       setLoading(false); // Explicitly set loading false here
     }
   };
   
   const signInWithEmail = async (email: string, password: string): Promise<FirebaseUser | null> => {
     if (!auth) {
       toast(authUnavailableError());
-      setLoading(false);
       return null;
     }
      if (!db) {
         toast({ title: "Database Error", description: "Login service is unavailable.", variant: "destructive" });
-        setLoading(false);
         return null;
     }
     setLoading(true);
@@ -254,11 +258,13 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       console.error("Error signing in with email: ", error);
       const message = (error.code === 'auth/invalid-credential' || error.code === 'auth/user-not-found' || error.code === 'auth/wrong-password')
         ? "Invalid email or password. Please try again."
+        : error.code === 'auth/network-request-failed'
+        ? "Network error. Please check your connection and try again."
         : error.message || "Failed to sign in.";
       toast({ title: "Sign-in Error", description: message, variant: "destructive" });
       return null;
     } finally {
-      setLoading(false);
+      setLoading(false); // Explicitly set loading false here
     }
   };
 
@@ -267,20 +273,20 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       toast(authUnavailableError());
       return;
     }
-    setLoading(true); // To give feedback, though onAuthStateChanged handles most state changes
+    setLoading(true); 
     try {
       await firebaseSignOut(auth);
-      // onAuthStateChanged will set currentUser to null
       router.push('/login'); 
     } catch (error: any) {
       console.error("Error signing out: ", error);
       toast({ title: "Sign-out Error", description: error.message || "Failed to sign out.", variant: "destructive" });
-      setLoading(false); // Ensure loading is false if sign-out itself fails
+    } finally {
+      setLoading(false); // Explicitly set loading false here
     }
   };
   
   const updateUserProfile = async (profileData: ProfileFormData) => {
-    if (!auth || !currentUser) {
+    if (!auth || !currentUser || !currentUser.uid ) { 
       toast(authUnavailableError());
       return;
     }
@@ -289,14 +295,14 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         return;
     }
     setLoading(true);
+    setIsCheckingProfile(true);
     try {
       const userDocRef = doc(db, "users", currentUser.uid);
-      const fbUser = auth.currentUser; // Get the most current Firebase auth user state
+      const fbUser = auth.currentUser; 
 
-      if (!fbUser) { // Should not happen if currentUser is set, but a safeguard
+      if (!fbUser) { 
         toast({ title: "Error", description: "Session expired. Please log in again.", variant: "destructive" });
-        setLoading(false);
-        signOut(); // Force sign out
+        signOut(); 
         return;
       }
 
@@ -310,22 +316,18 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         isProfileComplete: true, 
       };
       
-      // Update Firebase Auth profile (displayName, photoURL)
       await updateFirebaseProfile(fbUser, {
         displayName: profileData.displayName,
-        photoURL: profileData.photoURL || fbUser.photoURL, 
+        photoURL: profileData.photoURL || fbUser.photoURL || null, 
       });
       
-      // Update Firestore document
       await updateDoc(userDocRef, updateData);
       
-      // Refresh local currentUser state with merged data
       const refreshedUser = await refreshUser(); 
       if (refreshedUser?.isProfileComplete) {
         toast({ title: "Profile Updated", description: "Your profile has been successfully updated.", className: "bg-primary text-primary-foreground" });
         router.push('/'); 
       } else {
-         // This case should ideally not be hit if update was successful
          toast({ title: "Profile Update Note", description: "Profile data saved. Refreshing...", variant: "default" });
       }
 
@@ -334,18 +336,14 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       toast({ title: "Profile Update Failed", description: error.message || "Could not update your profile.", variant: "destructive" });
     } finally {
       setLoading(false);
+      setIsCheckingProfile(false);
     }
   };
 
-  // Show loading indicator if auth or db is not yet confirmed available by useEffect,
-  // or if any auth operation is in progress.
-  if (auth === undefined || loading || (auth && isCheckingProfile)) {
-    return <Loading />; 
+  if (loading || (isCheckingProfile && !pathname.startsWith('/login') && !pathname.startsWith('/signup'))) {
+    return <LoadingSpinner />; 
   }
   
-  // If auth explicitly failed to initialize (is null), show a message or a degraded app state.
-  // For now, children will render, but auth operations will fail with toasts.
-  // A more robust solution might be a global error boundary or a specific "service unavailable" page.
 
   return (
     <AuthContext.Provider value={{ currentUser, loading, isCheckingProfile, signInWithGoogle, signUpWithEmail, signInWithEmail, signOut, updateUserProfile, refreshUser }}>
@@ -361,3 +359,4 @@ export const useAuth = (): AuthContextType => {
   }
   return context;
 };
+
